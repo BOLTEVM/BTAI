@@ -3,6 +3,15 @@ import Image from "next/image";
 import { useState, useCallback, useMemo } from "react";
 import { usePrivy } from "@privy-io/react-auth";
 
+const USDC_REGISTRY = {
+  ethereum: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+  base: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+  optimism: "0x0b2c639c533813f4aa9d7837caf62653d097ff85",
+  arbitrum: "0xaf88d065e77c8cc2239327c5edb3a432268e5831",
+  polygon: "0x3c499c542cef5e3811e1192ce70d8cc03d5c3359",
+  avalanche: "0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E"
+};
+
 interface Agent {
   id: string | number;
   name: string;
@@ -71,6 +80,8 @@ export default function Home() {
           type: "x402",
           amount: "150",
           token: "USDC",
+          network: "base",
+          address: USDC_REGISTRY.base,
           recipient: "BTAI_VAULT_0x71...f3",
           challenge: "DEPOSIT_ESCROW_V1"
         };
@@ -86,15 +97,18 @@ export default function Home() {
     handleSendMessage(introMsg);
   };
 
-  const fulfillPayment = async (amount: string) => {
+  const fulfillPayment = async (amount: string, network: string) => {
     setIsProcessingPayment(true);
-    // Simulate smart contract interaction
+    // Simulate smart contract interaction with the real USDC address
+    const usdcAddress = USDC_REGISTRY[network as keyof typeof USDC_REGISTRY];
+    console.log(`BTAI Protocol: Initiating ${amount} USDC payment on ${network} (${usdcAddress})`);
+
     await new Promise(r => setTimeout(r, 2000));
     setIsProcessingPayment(false);
 
     setMessages(prev => [...prev, {
       role: "agent",
-      content: `✅ Payment of ${amount} USDC verified. The x402 challenge has been cleared. Initializing secure talent channel... Status: 200 OK.`
+      content: `✅ Payment of ${amount} USDC verified on ${network}. The x402 challenge has been cleared via ${usdcAddress.slice(0, 6)}...${usdcAddress.slice(-4)}. Initializing secure talent channel... Status: 200 OK.`
     }]);
   };
 
@@ -344,18 +358,18 @@ export default function Home() {
                   {msg.metadata?.type === "x402" && (
                     <div className="mt-4 pt-4 border-t border-white/10 flex flex-col gap-3">
                       <div className="flex justify-between items-center text-[10px] font-mono text-white/40">
-                        <span>PAYMENT-REQUIRED:</span>
+                        <span>PAYMENT-REQUIRED ({msg.metadata.network}):</span>
                         <span className="text-cyan-400">{msg.metadata.amount} {msg.metadata.token}</span>
                       </div>
                       <button
                         disabled={isProcessingPayment}
-                        onClick={() => fulfillPayment(msg.metadata.amount)}
+                        onClick={() => fulfillPayment(msg.metadata.amount, msg.metadata.network)}
                         className={`w-full py-2.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${isProcessingPayment
                             ? 'bg-white/5 text-white/20 cursor-wait'
                             : 'bg-white text-black hover:bg-cyan-400'
                           }`}
                       >
-                        {isProcessingPayment ? "Settling on Chain..." : "Authorize x402 Payment"}
+                        {isProcessingPayment ? "Settling on Chain..." : `Authorize x402 (${msg.metadata.network})`}
                       </button>
                     </div>
                   )}

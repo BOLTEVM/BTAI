@@ -9,7 +9,8 @@ const USDC_REGISTRY = {
   optimism: "0x0b2c639c533813f4aa9d7837caf62653d097ff85",
   arbitrum: "0xaf88d065e77c8cc2239327c5edb3a432268e5831",
   polygon: "0x3c499c542cef5e3811e1192ce70d8cc03d5c3359",
-  avalanche: "0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E"
+  avalanche: "0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E",
+  monad: "0x754704bc059f8c67012fed69bc8a327a5aafb603"
 };
 
 interface Agent {

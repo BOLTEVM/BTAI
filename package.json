@@ -1,0 +1,12 @@
+{
+    "name": "btai-monorepo",
+    "private": true,
+    "scripts": {
+        "dev:frontend": "pnpm --filter frontend dev",
+        "build": "pnpm -r build",
+        "test": "pnpm -r test"
+    },
+    "devDependencies": {
+        "turbo": "latest"
+    }
+}

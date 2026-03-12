@@ -19,6 +19,7 @@ interface Agent {
   rate: string;
   image: string;
   bio: string;
+  receiveAddress?: string;
   isCommunity?: boolean;
 }
 
@@ -33,7 +34,7 @@ export default function Home() {
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
 
   const [communityAgents, setCommunityAgents] = useState<Agent[]>([]);
-  const [formData, setFormData] = useState({ name: "", role: "", rate: "", bio: "" });
+  const [formData, setFormData] = useState({ name: "", role: "", rate: "", bio: "", receiveAddress: "" });
 
   const staticTalents: Agent[] = [
     {
@@ -121,11 +122,12 @@ export default function Home() {
       rate: `$${formData.rate}/hr`,
       image: "/0.png", // Default for community
       bio: formData.bio,
+      receiveAddress: formData.receiveAddress,
       isCommunity: true
     };
     setCommunityAgents(prev => [newAgent, ...prev]);
     setIsRegistering(false);
-    setFormData({ name: "", role: "", rate: "", bio: "" });
+    setFormData({ name: "", role: "", rate: "", bio: "", receiveAddress: "" });
   };
 
   return (
@@ -227,6 +229,13 @@ export default function Home() {
                 "{talent.bio}"
               </p>
 
+              {talent.receiveAddress && (
+                <div className="mb-6 flex flex-col gap-1">
+                  <span className="text-white/20 text-[8px] uppercase tracking-widest font-bold">Node Address</span>
+                  <span className="text-cyan-400 font-mono text-[9px] truncate">{talent.receiveAddress}</span>
+                </div>
+              )}
+
               <div className="mt-auto flex items-center justify-between pt-6 border-t border-white/5">
                 <div className="flex flex-col">
                   <span className="text-white/30 text-[9px] uppercase tracking-widest mb-1">Base Rate</span>
@@ -264,6 +273,16 @@ export default function Home() {
                   onChange={e => setFormData({ ...formData, name: e.target.value })}
                   className="bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-cyan-500/50 text-white"
                   placeholder="e.g. Neural Nexus Architect"
+                />
+              </div>
+              <div className="flex flex-col gap-2">
+                <label className="text-[10px] uppercase tracking-[0.2em] font-bold text-white/50">Agent Receive Address (BTAI Vault Wallet)</label>
+                <input
+                  required
+                  value={formData.receiveAddress}
+                  onChange={e => setFormData({ ...formData, receiveAddress: e.target.value })}
+                  className="bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-cyan-500/50 text-white font-mono"
+                  placeholder="0x..."
                 />
               </div>
               <div className="grid grid-cols-2 gap-4">
@@ -365,8 +384,8 @@ export default function Home() {
                         disabled={isProcessingPayment}
                         onClick={() => fulfillPayment(msg.metadata.amount, msg.metadata.network)}
                         className={`w-full py-2.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${isProcessingPayment
-                            ? 'bg-white/5 text-white/20 cursor-wait'
-                            : 'bg-white text-black hover:bg-cyan-400'
+                          ? 'bg-white/5 text-white/20 cursor-wait'
+                          : 'bg-white text-black hover:bg-cyan-400'
                           }`}
                       >
                         {isProcessingPayment ? "Settling on Chain..." : `Authorize x402 (${msg.metadata.network})`}

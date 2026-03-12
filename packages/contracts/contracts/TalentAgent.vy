@@ -1,7 +1,11 @@
 # @version ^0.3.7
 
-# AI Talent Agent Smart Contract
-# Manages talent-client agreements and escrowed payments.
+# BTAI Talent Agent Smart Contract
+# Manages talent-client agreements and escrowed payments via ERC20 (USDC).
+
+interface ERC20:
+    def transfer(_to: address, _value: uint256) -> bool: nonpayable
+    def transferFrom(_from: address, _to: address, _value: uint256) -> bool: nonpayable
 
 event AgreementCreated:
     agreement_id: uint256
@@ -23,6 +27,7 @@ event AgreementCancelled:
 struct Agreement:
     talent: address
     client: address
+    token: address
     amount: uint256
     deposited: uint256
     paid_out: uint256
@@ -37,15 +42,15 @@ def __init__():
     self.agent = msg.sender
 
 @external
-def create_agreement(talent: address, amount: uint256) -> uint256:
-    # The client or talent can create the agreement
-    # Usually the agent creates it after matching
+def create_agreement(talent: address, token: address, amount: uint256) -> uint256:
+    # Only BTAI Orchestrator or the Talent can initialize the escrow
     assert msg.sender == self.agent or msg.sender == talent, "Unauthorized"
     
     id: uint256 = self.agreement_count
     self.agreements[id] = Agreement({
         talent: talent,
-        client: empty(address), # Set during deposit
+        client: empty(address),
+        token: token,
         amount: amount,
         deposited: 0,
         paid_out: 0,
@@ -57,28 +62,30 @@ def create_agreement(talent: address, amount: uint256) -> uint256:
     return id
 
 @external
-@payable
 def deposit(agreement_id: uint256):
     ag: Agreement = self.agreements[agreement_id]
     assert ag.status == 0, "Agreement already funded or closed"
-    assert msg.value == ag.amount, "Incorrect deposit amount"
+    
+    # x402 Input: Fulfilling the "Payment Required" challenge
+    ERC20(ag.token).transferFrom(msg.sender, self, ag.amount)
     
     ag.client = msg.sender
-    ag.deposited = msg.value
+    ag.deposited = ag.amount
     ag.status = 1 # Funded
     self.agreements[agreement_id] = ag
     
-    log FundsDeposited(agreement_id, msg.value)
+    log FundsDeposited(agreement_id, ag.amount)
 
 @external
 def release_funds(agreement_id: uint256, amount: uint256):
-    # Only the AI Agent or the Client can release funds
+    # Only the BTAI Orchestrator or the Client can release funds
     ag: Agreement = self.agreements[agreement_id]
     assert msg.sender == self.agent or msg.sender == ag.client, "Unauthorized"
     assert ag.status == 1, "Agreement not in funded state"
     assert ag.paid_out + amount <= ag.deposited, "Release amount exceeds deposit"
     
-    send(ag.talent, amount)
+    # x402 Output: Settling the payout
+    ERC20(ag.token).transfer(ag.talent, amount)
     ag.paid_out += amount
     
     if ag.paid_out == ag.deposited:
@@ -97,7 +104,7 @@ def cancel_agreement(agreement_id: uint256):
     # Refund balance to client
     remaining: uint256 = ag.deposited - ag.paid_out
     if remaining > 0:
-        send(ag.client, remaining)
+        ERC20(ag.token).transfer(ag.client, remaining)
     
     ag.status = 3 # Cancelled
     self.agreements[agreement_id] = ag

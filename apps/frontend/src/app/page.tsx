@@ -18,9 +18,10 @@ export default function Home() {
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [isRegistering, setIsRegistering] = useState(false);
   const [chatInput, setChatInput] = useState("");
-  const [messages, setMessages] = useState([
+  const [messages, setMessages] = useState<any[]>([
     { role: "agent", content: "Hello! I am BTAI, the orchestrator of the Talent Agent Protocol. How can I facilitate your talent acquisition today?" }
   ]);
+  const [isProcessingPayment, setIsProcessingPayment] = useState(false);
 
   const [communityAgents, setCommunityAgents] = useState<Agent[]>([]);
   const [formData, setFormData] = useState({ name: "", role: "", rate: "", bio: "" });
@@ -57,17 +58,25 @@ export default function Home() {
     // Simulated agentic protocol logic
     setTimeout(() => {
       let reply = "I'm analyzing the protocol parameters for your request.";
+      let metadata: any = null;
       const lowInput = input.toLowerCase();
 
       if (lowInput.includes("talent") || lowInput.includes("architect") || lowInput.includes("designer")) {
         reply = "Our protocol identifies top-tier agentic talent. Would you like me to initiate a preliminary consultation with one of our specialized engineers?";
       } else if (lowInput.includes("protocol") || lowInput.includes("how it works")) {
         reply = "The BTAI Talent Protocol uses AI-mediated verification and automated escrow to ensure seamless collaboration between high-end talent and visionary clients.";
-      } else if (lowInput.includes("cost") || lowInput.includes("rate")) {
-        reply = "Rates are algorithmically verified by the protocol based on complexity and milestone deliverables. I can provide a specific breakdown once we define the scope.";
+      } else if (lowInput.includes("cost") || lowInput.includes("rate") || lowInput.includes("hire") || lowInput.includes("escrow")) {
+        reply = "To proceed with this engagement, the protocol requires an initial escrow deposit. Status: 402 Payment Required.";
+        metadata = {
+          type: "x402",
+          amount: "150",
+          token: "USDC",
+          recipient: "BTAI_VAULT_0x71...f3",
+          challenge: "DEPOSIT_ESCROW_V1"
+        };
       }
 
-      setMessages(prev => [...prev, { role: "agent", content: reply }]);
+      setMessages(prev => [...prev, { role: "agent", content: reply, metadata }]);
     }, 800);
   }, [chatInput]);
 
@@ -75,6 +84,18 @@ export default function Home() {
     setIsChatOpen(true);
     const introMsg = `I'm interested in the BTAI Protocol's orchestration for the ${talentName}.`;
     handleSendMessage(introMsg);
+  };
+
+  const fulfillPayment = async (amount: string) => {
+    setIsProcessingPayment(true);
+    // Simulate smart contract interaction
+    await new Promise(r => setTimeout(r, 2000));
+    setIsProcessingPayment(false);
+
+    setMessages(prev => [...prev, {
+      role: "agent",
+      content: `✅ Payment of ${amount} USDC verified. The x402 challenge has been cleared. Initializing secure talent channel... Status: 200 OK.`
+    }]);
   };
 
   const handleRegisterAgent = (e: React.FormEvent) => {
@@ -309,11 +330,35 @@ export default function Home() {
           <div className="flex-grow overflow-y-auto p-6 flex flex-col gap-6 scrollbar-hide">
             {messages.map((msg, i) => (
               <div key={i} className={`flex ${msg.role === 'agent' ? 'justify-start' : 'justify-end'}`}>
-                <div className={`max-w-[85%] px-5 py-3 rounded-2xl text-sm leading-relaxed ${msg.role === 'agent'
+                <div className={`max-w-[85%] px-5 py-3 rounded-2xl text-sm leading-relaxed relative ${msg.role === 'agent'
                   ? 'bg-white/5 border border-white/10 text-white/80 rounded-tl-none'
                   : 'bg-cyan-500 text-black font-medium rounded-tr-none'
                   }`}>
+                  {msg.metadata?.type === "x402" && (
+                    <div className="absolute -top-3 left-0 bg-red-500 text-[8px] font-black px-2 py-0.5 rounded uppercase tracking-widest animate-pulse">
+                      HTTP 402 Required
+                    </div>
+                  )}
                   {msg.content}
+
+                  {msg.metadata?.type === "x402" && (
+                    <div className="mt-4 pt-4 border-t border-white/10 flex flex-col gap-3">
+                      <div className="flex justify-between items-center text-[10px] font-mono text-white/40">
+                        <span>PAYMENT-REQUIRED:</span>
+                        <span className="text-cyan-400">{msg.metadata.amount} {msg.metadata.token}</span>
+                      </div>
+                      <button
+                        disabled={isProcessingPayment}
+                        onClick={() => fulfillPayment(msg.metadata.amount)}
+                        className={`w-full py-2.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${isProcessingPayment
+                            ? 'bg-white/5 text-white/20 cursor-wait'
+                            : 'bg-white text-black hover:bg-cyan-400'
+                          }`}
+                      >
+                        {isProcessingPayment ? "Settling on Chain..." : "Authorize x402 Payment"}
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
             ))}

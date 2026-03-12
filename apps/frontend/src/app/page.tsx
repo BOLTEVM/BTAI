@@ -43,7 +43,8 @@ export default function Home() {
       role: "AI Systems Engineer",
       rate: "$150/hr",
       image: "/0.png",
-      bio: "Master of agentic workflows and smart contract integration."
+      bio: "Master of agentic workflows and smart contract integration.",
+      receiveAddress: "0xf0198a8eaaf8d9c9527d628afa0beabe674169a5"
     },
     {
       id: 2,
@@ -51,7 +52,8 @@ export default function Home() {
       role: "Creative Director",
       rate: "$120/hr",
       image: "/BOLTM.jpeg",
-      bio: "Specializing in high-end digital aesthetics and immersive UI."
+      bio: "Specializing in high-end digital aesthetics and immersive UI.",
+      receiveAddress: "0xf0198a8eaaf8d9c9527d628afa0beabe674169a5"
     }
   ];
 

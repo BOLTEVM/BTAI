@@ -23,10 +23,13 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  console.log("BTAI: Layout Active V1.2");
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning={true}>
+      {/* BTAI Diagnostic: V1.2 Hydration Fix */}
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased font-sans bg-black text-white`}
+        suppressHydrationWarning={true}
       >
         <Providers>{children}</Providers>
       </body>

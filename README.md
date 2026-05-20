@@ -85,10 +85,22 @@ pnpm install
 ```
 
 ### 2. Development
+Create environment files before running services:
+```bash
+cp apps/backend/.env.example apps/backend/.env
+cp apps/frontend/.env.example apps/frontend/.env.local
+```
+
 Start the frontend development server:
 ```bash
 pnpm dev:frontend
 # App will be live at http://localhost:3000
+```
+
+Start the backend API in a second terminal:
+```bash
+pnpm dev:backend
+# API will be live at http://localhost:8000
 ```
 
 ### 3. Testing
@@ -96,6 +108,15 @@ Execute the Hardhat testing suite for the smart contracts:
 ```bash
 pnpm test
 ```
+
+---
+
+## Production Readiness
+
+- The backend no longer seeds demo talent profiles. Production data must be created through `POST /talent` or loaded by an explicit migration/import process.
+- The frontend reads `NEXT_PUBLIC_API_BASE_URL`, `NEXT_PUBLIC_PRIVY_APP_ID`, and `NEXT_PUBLIC_TALENT_AGENT_ADDRESS` from environment variables.
+- The backend reads `BTAI_DB_PATH`, `BTAI_ALLOWED_ORIGINS`, `BTAI_HOST`, `BTAI_PORT`, and `BTAI_LOG_LEVEL` from environment variables.
+- The `/chat` endpoint returns `503` until a real production AI provider is configured. It no longer returns simulated agent responses.
 
 ---
 

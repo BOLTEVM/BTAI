@@ -3,7 +3,11 @@
     "private": true,
     "scripts": {
         "dev:frontend": "pnpm --filter frontend dev",
+        "dev:backend": "python -m uvicorn main:app --reload --app-dir apps/backend",
         "build": "pnpm -r build",
+        "start:frontend": "pnpm --filter frontend start",
+        "start:backend": "python -m uvicorn main:app --app-dir apps/backend",
+        "lint": "pnpm --filter frontend lint",
         "test": "pnpm -r test"
     },
     "devDependencies": {

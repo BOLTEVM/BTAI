@@ -3,29 +3,33 @@
 import Image from "next/image";
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { usePrivy, useWallets } from "@privy-io/react-auth";
-import { createWalletClient, custom, encodeFunctionData, Hex, parseUnits } from "viem";
-import { base } from "viem/chains";
+import {
+  createPublicClient,
+  createWalletClient,
+  custom,
+  encodeFunctionData,
+  formatUnits,
+  Hex,
+  parseEventLogs,
+  parseUnits,
+} from "viem";
+import { DEFAULT_USDC_NETWORK, getUsdcDeployment, USDC_ABI, UsdcNetwork, USDC_REGISTRY } from "@/lib/usdc";
+import DeployTalentAgent from "@/components/DeployTalentAgent";
+// Generated from TalentAgent.vy, so the ABI can never drift from the deployed
+// bytecode the Deploy Escrow flow ships.
+import { TALENT_AGENT_ABI } from "@/lib/talentAgent.generated";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
-const TALENT_AGENT_ADDRESS = process.env.NEXT_PUBLIC_TALENT_AGENT_ADDRESS as Hex | undefined;
+const CONFIGURED_ESCROW = process.env.NEXT_PUBLIC_TALENT_AGENT_ADDRESS as Hex | undefined;
 
-const USDC_REGISTRY = {
-  base: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-} as const;
+// A session-deployed escrow overrides the configured one, so a user can put
+// their own TalentAgent on-chain and immediately route payments through it.
+const DEPLOYED_ESCROW_KEY = "btai.deployedEscrow";
 
-const TALENT_AGENT_ABI = [
-  {
-    name: "create_agreement",
-    type: "function",
-    inputs: [
-      { name: "talent", type: "address" },
-      { name: "token", type: "address" },
-      { name: "amount", type: "uint256" },
-    ],
-    outputs: [{ name: "", type: "uint256" }],
-    stateMutability: "nonpayable",
-  },
-] as const;
+interface DeployedEscrow {
+  address: Hex;
+  network: UsdcNetwork;
+}
 
 interface TalentApiProfile {
   id: number;
@@ -54,7 +58,7 @@ interface ChatMessage {
   content: string;
   payment?: {
     amount: string;
-    network: keyof typeof USDC_REGISTRY;
+    network: UsdcNetwork;
     recipient: string;
   };
 }
@@ -92,6 +96,8 @@ export default function Home() {
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [isDeployOpen, setIsDeployOpen] = useState(false);
+  const [deployedEscrow, setDeployedEscrow] = useState<DeployedEscrow | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       role: "agent",
@@ -107,6 +113,38 @@ export default function Home() {
     const data = (await response.json()) as TalentApiProfile[];
     setAgents(data.map(mapTalent));
   }, []);
+
+  useEffect(() => {
+    const stored = window.localStorage.getItem(DEPLOYED_ESCROW_KEY);
+    if (!stored) return;
+    try {
+      const parsed = JSON.parse(stored) as DeployedEscrow;
+      // Guard against a stale entry naming a network this build no longer ships.
+      if (parsed.address?.startsWith("0x") && parsed.network in USDC_REGISTRY) {
+        setDeployedEscrow(parsed);
+      } else {
+        window.localStorage.removeItem(DEPLOYED_ESCROW_KEY);
+      }
+    } catch {
+      window.localStorage.removeItem(DEPLOYED_ESCROW_KEY);
+    }
+  }, []);
+
+  const adoptDeployedEscrow = useCallback((address: string, network: UsdcNetwork) => {
+    const escrow: DeployedEscrow = { address: address as Hex, network };
+    setDeployedEscrow(escrow);
+    window.localStorage.setItem(DEPLOYED_ESCROW_KEY, JSON.stringify(escrow));
+    setMessages((prev) => [
+      ...prev,
+      {
+        role: "agent",
+        content: `Escrow node deployed to ${getUsdcDeployment(network).label} at ${address}. Payments now settle through it.`,
+      },
+    ]);
+  }, []);
+
+  const escrowAddress = deployedEscrow?.address ?? CONFIGURED_ESCROW;
+  const settlementNetwork = deployedEscrow?.network ?? DEFAULT_USDC_NETWORK;
 
   useEffect(() => {
     fetchTalents().catch((error) => {
@@ -166,7 +204,7 @@ export default function Home() {
         content: `Escrow is ready for ${agent.name}. Review the hourly rate and authorize when you are ready.`,
         payment: {
           amount: String(agent.rate),
-          network: "base",
+          network: settlementNetwork,
           recipient: agent.receiveAddress,
         },
       },
@@ -196,34 +234,104 @@ export default function Home() {
     }
   };
 
-  const fulfillPayment = async (amount: string, network: keyof typeof USDC_REGISTRY, recipient: string) => {
+  const fulfillPayment = async (amount: string, network: UsdcNetwork, recipient: string) => {
     if (!wallets[0]) return alert("Please connect your wallet first.");
-    if (!TALENT_AGENT_ADDRESS) return alert("Escrow contract address is not configured.");
+    if (!escrowAddress) {
+      return alert("No escrow contract configured. Deploy one, or set NEXT_PUBLIC_TALENT_AGENT_ADDRESS.");
+    }
     if (!recipient) return alert("Talent receive address is missing.");
+
+    const usdc = getUsdcDeployment(network);
+    const say = (content: string) => setMessages((prev) => [...prev, { role: "agent", content }]);
 
     setIsProcessingPayment(true);
     try {
       const wallet = wallets[0];
+      // Real USDC only exists on its own chain, so the wallet has to be there
+      // before anything is signed.
+      await wallet.switchChain(usdc.chain.id);
       const provider = await wallet.getEthereumProvider();
-      const client = createWalletClient({ chain: base, transport: custom(provider) });
-      const parsedAmount = parseUnits(amount, 6);
-      const data = encodeFunctionData({
+      const transport = custom(provider);
+      const publicClient = createPublicClient({ chain: usdc.chain, transport });
+      const walletClient = createWalletClient({ chain: usdc.chain, transport });
+      const account = wallet.address as Hex;
+      const parsedAmount = parseUnits(amount, usdc.decimals);
+
+      const balance = await publicClient.readContract({
+        address: usdc.address,
+        abi: USDC_ABI,
+        functionName: "balanceOf",
+        args: [account],
+      });
+      if (balance < parsedAmount) {
+        say(
+          `Insufficient ${usdc.label} USDC: the escrow needs ${amount} but this wallet holds ` +
+            `${formatUnits(balance, usdc.decimals)}.`
+        );
+        return;
+      }
+
+      // x402 Input, step 1: the escrow pulls USDC via transferFrom, so it needs
+      // an allowance. Skip the approval entirely if one already covers this.
+      const allowance = await publicClient.readContract({
+        address: usdc.address,
+        abi: USDC_ABI,
+        functionName: "allowance",
+        args: [account, escrowAddress],
+      });
+      if (allowance < parsedAmount) {
+        const approvalHash = await walletClient.sendTransaction({
+          account,
+          to: usdc.address,
+          data: encodeFunctionData({
+            abi: USDC_ABI,
+            functionName: "approve",
+            args: [escrowAddress, parsedAmount],
+          }),
+        });
+        say(`${usdc.label} USDC allowance approved. TX: ${approvalHash.slice(0, 10)}...`);
+        // The escrow call reverts if it lands before the approval is mined.
+        await publicClient.waitForTransactionReceipt({ hash: approvalHash });
+      }
+
+      // x402 Input, step 2: open and fund the escrow in one transaction. The
+      // caller is recorded as the client, so no orchestrator round-trip is
+      // needed and there is no unfunded agreement for anyone else to claim.
+      const escrowHash = await walletClient.sendTransaction({
+        account,
+        to: escrowAddress,
+        data: encodeFunctionData({
+          abi: TALENT_AGENT_ABI,
+          functionName: "create_and_deposit",
+          args: [recipient as Hex, usdc.address, parsedAmount],
+        }),
+      });
+      say(`Escrow funding submitted. TX: ${escrowHash.slice(0, 10)}...`);
+
+      const receipt = await publicClient.waitForTransactionReceipt({ hash: escrowHash });
+      if (receipt.status !== "success") {
+        say("Protocol error: the escrow transaction reverted on-chain. No USDC was moved.");
+        return;
+      }
+
+      // Read the agreement id back off the contract's own event rather than
+      // guessing it from agreement_count, which another client can advance.
+      const [deposited] = parseEventLogs({
         abi: TALENT_AGENT_ABI,
-        functionName: "create_agreement",
-        args: [recipient as Hex, USDC_REGISTRY[network], parsedAmount],
+        eventName: "FundsDeposited",
+        logs: receipt.logs,
       });
-      const txHash = await client.sendTransaction({
-        account: wallet.address as Hex,
-        to: TALENT_AGENT_ADDRESS,
-        data,
-      });
-      setMessages((prev) => [
-        ...prev,
-        { role: "agent", content: `Escrow agreement submitted on-chain. TX: ${txHash.slice(0, 10)}...` },
-      ]);
+      const agreementId = deposited?.args.agreement_id;
+
+      say(
+        agreementId === undefined
+          ? `${amount} ${usdc.label} USDC is held in escrow (x402 input cleared).`
+          : `Agreement #${agreementId.toString()} funded with ${amount} ${usdc.label} USDC. ` +
+            `x402 input cleared — funds release to the talent on completion.`
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : "Transaction rejected";
-      setMessages((prev) => [...prev, { role: "agent", content: `Protocol error: ${message}` }]);
+      say(`Protocol error: ${message}`);
     } finally {
       setIsProcessingPayment(false);
     }
@@ -243,6 +351,9 @@ export default function Home() {
             <>
               <button onClick={() => setIsRegistering(true)} className="text-xs font-bold uppercase tracking-widest text-cyan-400 hover:text-white">
                 + Register Agent
+              </button>
+              <button onClick={() => setIsDeployOpen(true)} className="text-xs font-bold uppercase tracking-widest text-cyan-400 hover:text-white">
+                + Deploy Escrow
               </button>
               <button onClick={logout} className="glass px-5 py-2 text-xs font-bold uppercase tracking-widest text-red-400 hover:bg-red-500/20">
                 Disconnect
@@ -267,6 +378,17 @@ export default function Home() {
           BTAI mediates high-end collaboration with registered talent profiles, wallet authentication, and smart contract escrow.
         </p>
         {statusMessage && <p className="mt-6 text-sm text-red-300">{statusMessage}</p>}
+        {escrowAddress ? (
+          <p className="mt-6 font-mono text-[11px] text-white/30">
+            Escrow {deployedEscrow ? "deployed this session" : "from configuration"} on{" "}
+            <span className="text-cyan-400">{getUsdcDeployment(settlementNetwork).label}</span> ·{" "}
+            <span className="text-white/50">{escrowAddress}</span>
+          </p>
+        ) : (
+          <p className="mt-6 text-sm text-amber-300/70">
+            No escrow contract yet. Deploy one to start settling in USDC.
+          </p>
+        )}
       </header>
 
       <section className="relative z-10">
@@ -347,6 +469,14 @@ export default function Home() {
         </div>
       )}
 
+      {isDeployOpen && (
+        <DeployTalentAgent
+          activeAddress={escrowAddress}
+          onDeployed={adoptDeployedEscrow}
+          onClose={() => setIsDeployOpen(false)}
+        />
+      )}
+
       {isChatOpen && (
         <div className="chat-container glass fixed bottom-10 right-10 z-50 h-[600px] w-[400px] overflow-hidden rounded-2xl border-white/10 shadow-[0_0_50px_rgba(0,0,0,0.5)]">
           <div className="flex items-center justify-between border-b border-white/10 bg-white/5 p-6">
@@ -361,7 +491,7 @@ export default function Home() {
                   {msg.payment && (
                     <div className="mt-4 flex flex-col gap-3 border-t border-white/10 pt-4">
                       <div className="flex items-center justify-between font-mono text-[10px] text-white/40">
-                        <span>{msg.payment.network.toUpperCase()} USDC</span>
+                        <span>{getUsdcDeployment(msg.payment.network).label} USDC</span>
                         <span className="text-cyan-400">{msg.payment.amount}</span>
                       </div>
                       <button disabled={isProcessingPayment} onClick={() => fulfillPayment(msg.payment!.amount, msg.payment!.network, msg.payment!.recipient)} className="w-full rounded-lg bg-white py-2.5 text-[10px] font-black uppercase tracking-widest text-black transition-all hover:bg-cyan-400 disabled:cursor-wait disabled:bg-white/10 disabled:text-white/30">

@@ -34,6 +34,7 @@ sequenceDiagram
     participant Frontend as BTAI Frontend (Orchestrator)
     participant Backend as BTAI Backend (Talent API)
     participant Contract as TalentAgent.vy (Escrow Contract)
+    participant USDC as USDC (Circle FiatToken)
 
     Client->>Frontend: Connect/Login (Privy)
     Frontend->>Backend: GET /talent (Fetch profiles)
@@ -43,11 +44,10 @@ sequenceDiagram
     Frontend->>Frontend: Trigger x402 Challenge
     
     Client-->>Frontend: Authorize x402
-    Frontend->>Contract: create_agreement(talent, token, amount)
-    Contract-->>Client: EMIT AgreementCreated
-    
-    Client->>Contract: deposit(agreement_id)
-    Contract-->>Client: EMIT FundsDeposited (x402 Input Cleared)
+    Frontend->>USDC: approve(escrow, amount)
+    Frontend->>Contract: create_and_deposit(talent, USDC, amount)
+    Contract->>USDC: transferFrom(client, escrow, amount)
+    Contract-->>Client: EMIT AgreementCreated + FundsDeposited (x402 Input Cleared)
     
     Note over Client,Contract: Active Consultation Phase
     
@@ -104,10 +104,19 @@ pnpm dev:backend
 ```
 
 ### 3. Testing
-Execute the Hardhat testing suite for the smart contracts:
+The escrow suite settles in **real USDC**, so it runs against a fork of a live
+chain rather than a locally minted stand-in token. Point `BASE_RPC_URL` at any
+Base mainnet RPC endpoint first:
+```bash
+cp packages/contracts/.env.example packages/contracts/.env
+```
+Then execute the Hardhat testing suite:
 ```bash
 pnpm test
 ```
+The public endpoint (`https://mainnet.base.org`) is enough — no API key needed.
+Without `BASE_RPC_URL` the escrow suite is skipped rather than silently falling
+back to a mock token.
 
 ---
 
@@ -117,14 +126,45 @@ pnpm test
 - The frontend reads `NEXT_PUBLIC_API_BASE_URL`, `NEXT_PUBLIC_PRIVY_APP_ID`, and `NEXT_PUBLIC_TALENT_AGENT_ADDRESS` from environment variables.
 - The backend reads `BTAI_DB_PATH`, `BTAI_ALLOWED_ORIGINS`, `BTAI_HOST`, `BTAI_PORT`, and `BTAI_LOG_LEVEL` from environment variables.
 - The `/chat` endpoint returns `503` until a real production AI provider is configured. It no longer returns simulated agent responses.
+- The x402 rail settles in canonical, Circle-issued USDC (6 decimals) — there is no mock token in the repo. Deployments live in `apps/frontend/src/lib/usdc.ts` and `packages/contracts/usdc.js`; keep the two tables in sync.
+- `NEXT_PUBLIC_X402_NETWORK` selects which USDC deployment the payment challenge settles on (defaults to `base`). The frontend switches the connected wallet to that chain before signing.
+- The x402 input is a two-transaction flow signed entirely by the client: `approve` on USDC (skipped when an allowance already covers the amount), then `create_and_deposit` on the escrow. The approval is awaited before the escrow call so it cannot land first and revert.
+- The **Deploy Escrow** flow (`apps/frontend/src/components/DeployTalentAgent.tsx`) lets a user put their own `TalentAgent` on-chain from the browser via `BaiWalletPipeline.deployAndAwaitContract`, picking both the signing wallet and the settlement network. The deployed address is adopted for the session (persisted in `localStorage`) and overrides `NEXT_PUBLIC_TALENT_AGENT_ADDRESS` until cleared.
+- The deploy bytecode is checked in at `apps/frontend/src/lib/talentAgent.generated.ts`. **Regenerate it whenever `TalentAgent.vy` changes:**
+  ```bash
+  pnpm --filter contracts export:artifact
+  ```
+- **`create_and_deposit` is new — `NEXT_PUBLIC_TALENT_AGENT_ADDRESS` must point at a redeployed `TalentAgent`.** The older two-step `create_agreement` + `deposit` path is unchanged and still available for orchestrator-initiated agreements, but the frontend no longer uses it: `create_agreement` is gated on the agent or the talent, so a client could never drive it, and it leaves a created-but-unfunded agreement that any address can claim by depositing first.
 
 ---
 
 ## 🧪 Smart Contract Verification
 Our core protocol logic is verified by a suite of Hardhat tests:
 - **Agreements**: Ensures correct creation and milestone tracking.
-- **Escrow**: Validates deposit, release, and refund logic.
+- **Escrow**: Validates deposit, release, and refund logic against real USDC on a forked chain.
+- **Atomic Funding**: Confirms `create_and_deposit` opens and funds an agreement in a single client-signed transaction.
 - **Authorization**: Restricts critical actions to the verified BTAI Orchestrator and project participants.
+
+---
+
+## 🔌 Wallet Pipeline
+
+`apps/frontend/src/lib/WalletPipeline.ts` is the Web3 execution layer. Both entry
+points — `executeAndAwaitTransaction` and `deployAndAwaitContract` — resolve only
+once the receipt is confirmed, so a single `await` covers the whole lifecycle:
+
+| Stage | What it does |
+| --- | --- |
+| `resolving-account` | Reads the signer from the provider when `from` is omitted |
+| `switching-chain` | `wallet_switchEthereumChain`, falling back to `wallet_addEthereumChain` |
+| `awaiting-signature` | Blocks on the wallet prompt |
+| `awaiting-confirmation` | Polls for the receipt, then for N confirmations |
+| `confirmed` / `failed` | Terminal, carrying `contractAddress` for deployments |
+
+Pass `onProgress` to render those stages live — that is what drives the deploy
+checklist. Receipts are read back **through the caller's own EIP-1193 provider**,
+which is what makes browser-extension and modal wallets awaitable on public
+networks where no local RPC endpoint is reachable.
 
 ---
 

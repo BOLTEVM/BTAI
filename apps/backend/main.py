@@ -195,6 +195,28 @@ async def update_talent(talent_id: int, profile: TalentProfileInput):
     return row_to_profile(row)
 
 
+class DeltaVReportRequest(BaseModel):
+    message: Optional[str] = Field(default=None, max_length=5000)
+    api_key: Optional[str] = Field(default=None)
+
+
+@app.post("/deltav/weekly-update")
+@app.post("/deltav/report")
+async def send_deltav_report(req: Optional[DeltaVReportRequest] = None):
+    try:
+        from deltav_protocol import DeltaVReportProtocol, generate_full_suite_report
+        custom_notes = req.message if req else None
+        api_key = req.api_key if req else None
+        
+        content = generate_full_suite_report(custom_notes)
+        protocol = DeltaVReportProtocol(api_key=api_key)
+        res = protocol.transport_report(content)
+        return {"status": "ok", "transport_result": res}
+    except Exception as e:
+        logger.error("Failed to transport deltaV report: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/chat")
 async def chat(msg: ChatMessage):
     raise HTTPException(

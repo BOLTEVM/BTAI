@@ -1,0 +1,98 @@
+name: BTAI CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.29.3
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Hardhat unit tests (TalentAgent + TalentAgentQuai)
+        run: pnpm --filter contracts test
+
+  fuzz:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.29.3
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: foundry-rs/foundry-toolchain@v1
+      - run: pnpm install --frozen-lockfile
+      - name: Compile artifacts and sync into the Foundry project
+        run: |
+          cd packages/contracts
+          npx hardhat compile
+          node scripts/sync-foundry-artifacts.js
+      - name: Forge fuzz + invariant tests on the Vyper bytecode
+        run: cd packages/contracts/foundry && forge test -vvv
+
+  slither:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Slither static analysis (Solidity helper contracts)
+        uses: crytic/slither-action@v0.4.1
+        with:
+          target: packages/contracts/contracts/TestSettlementToken.sol
+          slither-version: 0.11.6
+          fail-on: medium
+      # NOTE: Slither cannot analyze Vyper. TalentAgentQuai.vy coverage is the
+      # Hardhat unit suite + Foundry fuzz/invariant suites on its bytecode.
+
+  facilitator:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.29.3
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter facilitator test
+
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r apps/backend/requirements.txt
+      - run: cd apps/backend && python -m pytest test_api.py -q
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.29.3
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter frontend build
+        env:
+          NEXT_PUBLIC_PRIVY_APP_ID: dummy-ci-app-id

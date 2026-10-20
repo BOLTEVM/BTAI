@@ -138,6 +138,41 @@ back to a mock token.
 
 ---
 
+## 🐳 Backend Deployment
+
+Two services make the live rail work: the **talent API** (`apps/backend`, FastAPI + sqlite — the directory and the x402 challenge endpoint) and the **facilitator** (`packages/facilitator`, Node + quais.js — settles signed escrow authorizations on QUAI). Both ship as OCI images, built and smoke-tested in CI (`docker` job).
+
+```bash
+# talent API — build context is the backend folder
+docker build -t btai-api apps/backend
+docker run -d -p 8000:8000 --env-file .env -v btai-talent-data:/data btai-api
+
+# facilitator — build context is the REPO ROOT (pnpm workspace)
+docker build -f packages/facilitator/Dockerfile -t btai-facilitator .
+docker run -d --env-file .env -v btai-facilitator-data:/data btai-facilitator
+
+# or both at once
+cp deploy.env.example .env   # fill in FACILITATOR_PRIVATE_KEY, review the rest
+docker compose up -d --build
+```
+
+Both images run as a non-root user, honor the platform-injected `$PORT` (API), store state on a mounted `/data` volume (sqlite directory / nonce registry), and expose `/health` (wired to Docker HEALTHCHECK).
+
+**Env contract:** `deploy.env.example` is the single annotated template. The load-bearing entries:
+
+| Variable | Service | Why it matters |
+|---|---|---|
+| `BTAI_ALLOWED_ORIGINS` | API | CORS allowlist — must include `https://darkcircle.si` or the deployed frontend cannot call the API |
+| `ESCROW_ADDRESS` | both | the `TalentAgentQuai` the rail settles through (mainnet `0x00558035…`, Orchard `0x0042bc0B…`) |
+| `SETTLEMENT_TOKEN` / `SETTLEMENT_TOKENS` | API / facilitator | allowlisted settlement token(s); facilitator takes a lowercase csv |
+| `X402_NETWORK` | API | CAIP-2 network in the payment challenge (`eip155:9` mainnet, `eip155:15000` Orchard) |
+| `FACILITATOR_URL` | API | where `/engage` settlements are verified+settled |
+| `FACILITATOR_PRIVATE_KEY` | facilitator | the escrow's on-chain `agent` — a hot wallet; keep its QUAI balance capped, never commit it, rotate on leak |
+
+**Wiring the suite frontend to it:** once the API is reachable at a public URL, set the `BTAI_API_BASE_URL` Actions variable in the DarkCircle repo and push (or re-run the deploy) — the frontend inlines it at build time.
+
+---
+
 ## 🧪 Smart Contract Verification
 Our core protocol logic is verified by a suite of Hardhat tests:
 - **Agreements**: Ensures correct creation and milestone tracking.

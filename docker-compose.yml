@@ -1,0 +1,33 @@
+# Convenience orchestration for self-hosting the Dark Star Rail backend stack.
+# Each service also builds and runs standalone — see "Backend deployment" in README.md
+# for the full env contract. Copy deploy.env.example to .env and fill it in first.
+services:
+  api:
+    build: ./apps/backend
+    env_file: .env
+    environment:
+      BTAI_DB_PATH: /data/talent.db
+      # the compose-internal facilitator; point at an external URL instead if hosted elsewhere
+      FACILITATOR_URL: http://facilitator:3402
+    ports:
+      - "8000:8000"
+    volumes:
+      - btai-talent-data:/data
+    restart: unless-stopped
+    depends_on:
+      - facilitator
+
+  facilitator:
+    build:
+      context: .
+      dockerfile: packages/facilitator/Dockerfile
+    env_file: .env
+    # no published port: only the API talks to the facilitator, and it holds the
+    # settlement hot key — keep it off the public interface
+    volumes:
+      - btai-facilitator-data:/data
+    restart: unless-stopped
+
+volumes:
+  btai-talent-data:
+  btai-facilitator-data:

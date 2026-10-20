@@ -25,8 +25,10 @@ import DeployTalentAgent from "@/components/DeployTalentAgent";
 // Generated from TalentAgent.vy, so the ABI can never drift from the deployed
 // bytecode the Deploy Escrow flow ships.
 import { TALENT_AGENT_ABI } from "@/lib/talentAgent.generated";
+import { assetPath } from "@/lib/asset";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
+const DEFAULT_AVATAR = assetPath("/0logov3.png");
 const CONFIGURED_ESCROW = process.env.NEXT_PUBLIC_TALENT_AGENT_ADDRESS as Hex | undefined;
 const CONFIGURED_QUAI_ESCROW = process.env.NEXT_PUBLIC_TALENT_AGENT_QUAI_ADDRESS as Hex | undefined;
 
@@ -117,7 +119,7 @@ function mapTalent(profile: TalentApiProfile): Agent {
     name: profile.name,
     role: profile.role,
     rate: profile.rate,
-    image: profile.image_url || "/0logov3.png",
+    image: profile.image_url || DEFAULT_AVATAR,
     bio: profile.bio,
     receiveAddress: profile.receive_address,
     skills: profile.skills,
@@ -226,7 +228,7 @@ export default function Home() {
       bio: formData.bio,
       receive_address: formData.receiveAddress,
       skills: [],
-      image_url: isEditing?.image === "/0logov3.png" ? null : isEditing?.image ?? null,
+      image_url: isEditing?.image === DEFAULT_AVATAR ? null : isEditing?.image ?? null,
     };
     const endpoint = isEditing ? `${API_BASE_URL}/talent/${isEditing.id}` : `${API_BASE_URL}/talent`;
     const response = await fetch(endpoint, {
@@ -567,7 +569,7 @@ export default function Home() {
 
       <nav className="relative z-10 mb-20 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <Image src="/0logov3.png" alt="Dark Star Rail logo" width={40} height={40} className="rounded-full border border-white/20 shadow-lg shadow-cyan-500/20" />
+          <Image src={DEFAULT_AVATAR} alt="Dark Star Rail logo" width={40} height={40} className="rounded-full border border-white/20 shadow-lg shadow-cyan-500/20" />
           <span className="text-xl font-bold tracking-tighter gradient-text uppercase">Dark Star Rail</span>
         </div>
         <div className="flex items-center gap-4">

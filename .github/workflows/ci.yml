@@ -103,3 +103,31 @@ jobs:
       # init and a dummy value fails static prerender; Providers.tsx renders a
       # build-safe fallback when the var is unset.
       - run: pnpm --filter frontend build
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build talent API image
+        run: docker build -t btai-api-ci apps/backend
+      - name: Build facilitator image (repo-root context)
+        run: docker build -f packages/facilitator/Dockerfile -t btai-facilitator-ci .
+      - name: Smoke - API image serves /health
+        run: |
+          docker run -d --name btai-api -e BTAI_ALLOWED_ORIGINS=https://darkcircle.si -p 8000:8000 btai-api-ci
+          ok=0
+          for i in $(seq 1 15); do curl -fsS http://127.0.0.1:8000/health && ok=1 && break || sleep 2; done
+          docker rm -f btai-api
+          test "$ok" = 1
+      - name: Smoke - facilitator image serves /health
+        # Hardhat account #0 key — public, used only to let the adapter boot without a real chain
+        run: |
+          docker run -d --name btai-fac \
+            -e FACILITATOR_ADAPTER=local \
+            -e FACILITATOR_PRIVATE_KEY=0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d \
+            -e ESCROW_ADDRESS=0x0000000000000000000000000000000000000001 \
+            -p 3402:3402 btai-facilitator-ci
+          ok=0
+          for i in $(seq 1 20); do curl -fsS http://127.0.0.1:3402/health && ok=1 && break || sleep 2; done
+          docker rm -f btai-fac
+          test "$ok" = 1

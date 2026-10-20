@@ -18,6 +18,8 @@ const nextConfig: NextConfig = {
         output: "export",
         basePath: pagesBasePath,
         images: { unoptimized: true },
+        // inline the base path into the client bundle so assetPath() can prefix public/ URLs
+        env: { NEXT_PUBLIC_BASE_PATH: pagesBasePath },
       }
     : {}),
 };

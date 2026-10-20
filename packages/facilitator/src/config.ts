@@ -30,7 +30,9 @@ function required(name: string): string {
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): FacilitatorConfig {
   const chainId = Number(env.FACILITATOR_CHAIN_ID || "9");
   return {
-    port: Number(env.FACILITATOR_PORT || "3402"),
+    // Render injects PORT=10000 for Docker services and reports the service address
+    // with it; FACILITATOR_PORT wins when set explicitly, then PORT, then 3402.
+    port: Number(env.FACILITATOR_PORT || env.PORT || "3402"),
     network: env.FACILITATOR_NETWORK || `eip155:${chainId}`,
     chainId,
     rpcUrl: env.QUAI_RPC_URL || env.FACILITATOR_RPC_URL || "https://rpc.quai.network",

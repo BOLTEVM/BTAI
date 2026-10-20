@@ -388,3 +388,18 @@ describe("HTTP surface", () => {
     }
   });
 });
+
+describe("loadConfig port precedence", () => {
+  it("honors FACILITATOR_PORT, then Render's injected PORT, then 3402", async () => {
+    process.env.ESCROW_ADDRESS = "0x0000000000000000000000000000000000000001";
+    try {
+      const { loadConfig } = await import("../src/config");
+      const base = {} as NodeJS.ProcessEnv;
+      expect(loadConfig(base).port).toBe(3402);
+      expect(loadConfig({ PORT: "10000" }).port).toBe(10000);
+      expect(loadConfig({ PORT: "10000", FACILITATOR_PORT: "3403" }).port).toBe(3403);
+    } finally {
+      delete process.env.ESCROW_ADDRESS;
+    }
+  });
+});

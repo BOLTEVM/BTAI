@@ -58,7 +58,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="BTAI Talent Agent API", version="1.0.0", lifespan=lifespan)
+app = FastAPI(title="Dark Star Rail Talent API", version="1.0.0", lifespan=lifespan)
 
 if ALLOWED_ORIGINS:
     app.add_middleware(

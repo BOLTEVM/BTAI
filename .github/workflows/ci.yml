@@ -1,4 +1,4 @@
-name: BTAI CI
+name: Dark Star Rail CI
 
 on:
   push:

@@ -149,7 +149,7 @@ export default function Home() {
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       role: "agent",
-      content: "BTAI protocol interface is online. Select verified talent to start an escrow flow.",
+      content: "Dark Star Rail interface is online. Select verified talent to start an escrow flow.",
     },
   ]);
 
@@ -206,7 +206,7 @@ export default function Home() {
 
   useEffect(() => {
     fetchTalents().catch((error) => {
-      console.error("BTAI: Failed to fetch talents", error);
+      console.error("DarkStarRail: Failed to fetch talents", error);
       setStatusMessage("Talent API is unavailable. Check NEXT_PUBLIC_API_BASE_URL and backend health.");
     });
   }, [fetchTalents]);
@@ -567,8 +567,8 @@ export default function Home() {
 
       <nav className="relative z-10 mb-20 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <Image src="/0logov3.png" alt="BTAI Logo" width={40} height={40} className="rounded-full border border-white/20 shadow-lg shadow-cyan-500/20" />
-          <span className="text-xl font-bold tracking-tighter gradient-text uppercase">BTAI Protocol</span>
+          <Image src="/0logov3.png" alt="Dark Star Rail logo" width={40} height={40} className="rounded-full border border-white/20 shadow-lg shadow-cyan-500/20" />
+          <span className="text-xl font-bold tracking-tighter gradient-text uppercase">Dark Star Rail</span>
         </div>
         <div className="flex items-center gap-4">
           {authenticated ? (
@@ -599,7 +599,7 @@ export default function Home() {
           THE <span className="gradient-text">AGENTIC</span> TALENT PROTOCOL.
         </h1>
         <p className="max-w-2xl text-xl font-light leading-relaxed text-white/50">
-          BTAI mediates high-end collaboration with registered talent profiles, wallet authentication, and smart contract escrow.
+          Dark Star Rail mediates high-end collaboration with registered talent profiles, wallet authentication, and smart contract escrow on Quai Network.
         </p>
 
         <div className="mt-8 flex items-center gap-3">
@@ -761,9 +761,9 @@ export default function Home() {
       )}
 
       <footer className="mt-40 flex flex-col items-center justify-between gap-6 border-t border-white/5 pb-12 pt-12 md:flex-row">
-        <span className="text-[10px] font-bold uppercase tracking-[0.4em] text-white/20">Powered by BTAI Protocol</span>
+        <span className="text-[10px] font-bold uppercase tracking-[0.4em] text-white/20">Powered by Dark Star Rail</span>
         <span className="text-[10px] font-light uppercase tracking-[0.2em] text-white/10">
-          &copy; 2026 BTAI Talent Interface | Secured by V3 Mila
+          &copy; 2026 Dark Star Rail | A DarkCircle Suite app
         </span>
       </footer>
     </div>

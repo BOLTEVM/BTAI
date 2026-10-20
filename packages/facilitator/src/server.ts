@@ -38,6 +38,8 @@ export function createServer(
           extra: {
             escrow: config.escrowAddress,
             settlementTokens: config.settlementTokens,
+            // PINNED ON-CHAIN: deployed escrows verify this exact EIP-712
+            // domain name (NAME_HASH). Brand is Dark Star Rail; never change.
             eip712: { name: "BTAI Talent Agency", version: "1" },
           },
         },

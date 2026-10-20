@@ -272,7 +272,7 @@ export default function DeployTalentAgent({ activeAddress, onDeployed, onClose }
           </div>
           {quaiTarget && (
             <p className="mt-3 text-[11px] leading-relaxed text-cyan-300/70">
-              QUAI rail: clients settle gaslessly — they sign an EIP-712 authorization and the BTAI facilitator
+              QUAI rail: clients settle gaslessly — they sign an EIP-712 authorization and the Dark Star Rail facilitator
               submits it on-chain. The escrow constructor pins the settlement token and a 2.5% protocol fee to you.
             </p>
           )}

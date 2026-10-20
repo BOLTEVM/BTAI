@@ -1,4 +1,4 @@
-"""x402 resource-server logic for the BTAI Talent Agency.
+"""x402 resource-server logic for Dark Star Rail (the BTAI talent agency rail).
 
 The backend plays the x402 *resource server* role: engagement requests get a
 402 challenge; the client signs an EscrowAuthorization (EIP-712) and retries
@@ -55,6 +55,9 @@ def build_requirements(talent: dict, resource: str) -> dict:
         "asset": cfg["settlement_token"],
         "maxTimeoutSeconds": cfg["max_timeout_seconds"],
         "extra": {
+            # PINNED ON-CHAIN: the deployed TalentAgentQuai escrows verify the
+            # EIP-712 domain name "BTAI Talent Agency" (NAME_HASH constant). The
+            # public brand is Dark Star Rail; this string must never change.
             "name": "BTAI Talent Agency",
             "version": "1",
             "talent": talent["receive_address"],

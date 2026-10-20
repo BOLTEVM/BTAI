@@ -1,9 +1,9 @@
 <div align="center">
-  <img src="./BOLTM.jpeg" alt="BTAI Header" width="800">
+  <img src="./0logov3.png" alt="Dark Star Rail" width="180">
 
-  # BTAI Talent Protocol
+  # Dark Star Rail
 
-  > **BTAI mediates the future of high-end collaboration.**  
+  > **Dark Star Rail mediates the future of high-end collaboration.**  
   > A trustless protocol for hiring, escrowing, and delivering through specialized AI agents and top-tier Talent.
 
 </div>
@@ -12,7 +12,7 @@
 
 ## 🚀 Overview
 
-BTAI (formerly BAI) is an agentic framework designed to bridge the gap between visionary clients and elite AI/Human talent. By leveraging secure smart contracts and AI-mediated orchestration, BTAI ensures that milestone-based delivery is guaranteed and collaboration is friction-less.
+Dark Star Rail (formerly BTAI/BAI) is an agentic framework, part of the **DarkCircle Suite** on Quai Network, designed to bridge the gap between visionary clients and elite AI/Human talent. By leveraging secure smart contracts and AI-mediated orchestration, Dark Star Rail ensures that milestone-based delivery is guaranteed and collaboration is friction-less.
 
 ## ✨ Key Features
 
@@ -26,13 +26,13 @@ BTAI (formerly BAI) is an agentic framework designed to bridge the gap between v
 
 ## 🌊 Protocol Orchestration Flow (v402)
 
-The BTAI Talent Protocol uses an async, agent-mediated escrow flow. Below is the architectural visualization of the "Input/Output" lifecycle:
+Dark Star Rail uses an async, agent-mediated escrow flow. Below is the architectural visualization of the "Input/Output" lifecycle:
 
 ```mermaid
 sequenceDiagram
     participant Client as Client (User Wallet)
-    participant Frontend as BTAI Frontend (Orchestrator)
-    participant Backend as BTAI Backend (Talent API)
+    participant Frontend as Dark Star Rail Frontend (Orchestrator)
+    participant Backend as Dark Star Rail Backend (Talent API)
     participant Contract as TalentAgent.vy (Escrow Contract)
     participant USDC as USDC (Circle FiatToken)
 
@@ -66,7 +66,7 @@ sequenceDiagram
 │   └── backend/          # Python Agentic Services
 ├── packages/
 │   └── contracts/        # Vyper Smart Contracts + Hardhat Tests
-├── BOLTM.jpeg            # Brand Identity Asset
+├── 0logov3.png           # Brand Identity Asset
 └── package.json          # Monorepo Orchestration
 ```
 
@@ -143,7 +143,7 @@ Our core protocol logic is verified by a suite of Hardhat tests:
 - **Agreements**: Ensures correct creation and milestone tracking.
 - **Escrow**: Validates deposit, release, and refund logic against real USDC on a forked chain.
 - **Atomic Funding**: Confirms `create_and_deposit` opens and funds an agreement in a single client-signed transaction.
-- **Authorization**: Restricts critical actions to the verified BTAI Orchestrator and project participants.
+- **Authorization**: Restricts critical actions to the verified Dark Star Rail Orchestrator and project participants.
 
 ---
 
@@ -169,10 +169,10 @@ networks where no local RPC endpoint is reachable.
 ---
 
 ## 🌐 Vision
-BTAI is the foundation for the next generation of work. By combining **BTAIZERO**'s orchestration with a global network of specialized AI nodes, we are building the definitive infrastructure for the agentic economy.
+Dark Star Rail is the foundation for the next generation of work. By combining agentic orchestration with a global network of specialized AI nodes, we are building the definitive infrastructure for the agentic economy on Quai Network.
 
 ---
 
 <div align="center">
-  &copy; 2026 BTAI TALENT INTERFACE • SECURED BY V3 MILA
+  &copy; 2026 DARK STAR RAIL • A DARKCIRCLE SUITE APP
 </div>

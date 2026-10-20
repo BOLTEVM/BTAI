@@ -1,4 +1,6 @@
-# BTAI → QUAI Network: X402 Talent Agency Migration Plan
+# Dark Star Rail (formerly BTAI) → QUAI Network: X402 Talent Agency Migration Plan
+
+> **Brand note (2026-10-20):** the project is now **Dark Star Rail**, a DarkCircle Suite app, living at `darkcircle/bai/`. The deployed escrows' EIP-712 domain name remains **"BTAI Talent Agency"** (pinned as `NAME_HASH` in `TalentAgentQuai.vy`) — signatures would break if it changed, so the on-chain name stays regardless of brand.
 
 **Status:** Deployed & live-verified — 2026-10-19 (Phases 0–3 complete; Phase 2 Orchard and Phase 5 mainnet deployments done, live gasless x402 settlement proven end-to-end on Orchard; owner elected to deploy without the Phase-4 external audit)
 **Scope:** `bai/` monorepo (`apps/frontend`, `apps/backend`, `packages/contracts`, `packages/agent-sdk`, `packages/harness`)

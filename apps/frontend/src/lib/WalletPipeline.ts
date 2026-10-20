@@ -394,8 +394,15 @@ export class BaiWalletPipeline {
         this.guards = null;
         try {
             // Deliberate runtime lookup of an optional peer that may not exist.
+            // The specifier is computed so bundlers cannot statically resolve it:
+            // at suite depth it now DOES resolve (darkcircle/bai sits one level
+            // deeper than the old repo root), and theguards pulls in Node
+            // builtins (`fs`) that break the browser bundle. Runtime `require`
+            // in a plain browser does not exist either way — both cases fall
+            // through to null and the native implementation runs.
             // eslint-disable-next-line @typescript-eslint/no-require-imports
-            this.guards = (require('../../../../../../theguards') as GuardsModule) ?? null;
+            const specifier = ["..", "..", "..", "..", "..", "..", "theguards"].join("/");
+            this.guards = (require(specifier) as GuardsModule) ?? null;
         } catch {
             // Standalone mode fallback
         }

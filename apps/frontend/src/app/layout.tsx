@@ -3,8 +3,8 @@ import "./globals.css";
 import Providers from "./Providers";
 
 export const metadata: Metadata = {
-  title: "BTAI Talent Protocol",
-  description: "Agentic AI Talent Protocol",
+  title: "Dark Star Rail",
+  description: "Agentic AI talent escrow on Quai Network — a DarkCircle Suite app",
 };
 
 export default function RootLayout({

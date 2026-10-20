@@ -4,7 +4,7 @@ import { NonceRegistry } from "./nonceRegistry";
 import { createServer } from "./server";
 
 /**
- * BTAI x402 facilitator entry point.
+ * Dark Star Rail x402 facilitator entry point.
  *
  * FACILITATOR_ADAPTER=local uses ethers (Hardhat/Anvil dev). The default
  * "quai" path loads quais.js lazily so local dev never pays the import cost

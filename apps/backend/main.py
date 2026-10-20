@@ -1,12 +1,18 @@
+import base64
+import json
 import logging
 import os
 import sqlite3
 from contextlib import asynccontextmanager, closing
 from typing import List, Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
+
+from auth import issue_nonce, require_wallet_auth, validate_address_for_chain
+from x402_server import build_requirements, decode_payment_signature, verify_and_settle
 
 
 DB_PATH = os.getenv("BTAI_DB_PATH", "talent.db")
@@ -87,9 +93,9 @@ class TalentProfileInput(BaseModel):
     @field_validator("receive_address")
     @classmethod
     def validate_receive_address(cls, value: str) -> str:
-        if not value.startswith("0x"):
-            raise ValueError("receive_address must be an EVM address")
-        int(value[2:], 16)
+        ok, reason = validate_address_for_chain(value)
+        if not ok:
+            raise ValueError(reason)
         return value
 
     @field_validator("skills")
@@ -126,6 +132,12 @@ async def health():
     return {"status": "ok"}
 
 
+@app.get("/auth/nonce")
+async def auth_nonce():
+    """Issue a single-use SIWE nonce for wallet-authenticated writes."""
+    return issue_nonce()
+
+
 @app.get("/talent", response_model=List[TalentProfile])
 async def get_talent():
     with closing(get_connection()) as conn:
@@ -134,7 +146,10 @@ async def get_talent():
 
 
 @app.post("/talent", response_model=TalentProfile, status_code=201)
-async def create_talent(profile: TalentProfileInput):
+async def create_talent(profile: TalentProfileInput, signer: str = Depends(require_wallet_auth)):
+    # You may only register yourself: the signer must own the payout address.
+    if signer != profile.receive_address.lower():
+        raise HTTPException(status_code=403, detail="Signer must control receive_address")
     with closing(get_connection()) as conn:
         cursor = conn.execute(
             """
@@ -167,9 +182,54 @@ async def get_talent_by_id(talent_id: int):
     return row_to_profile(row)
 
 
-@app.put("/talent/{talent_id}", response_model=TalentProfile)
-async def update_talent(talent_id: int, profile: TalentProfileInput):
+@app.get("/engage/{talent_id}")
+async def engage_talent(talent_id: int, payment_signature: Optional[str] = Header(default=None)):
+    """
+    x402 engagement endpoint.
+
+    Without a PAYMENT-SIGNATURE header: responds 402 with the payment
+    requirements (also in the PAYMENT-REQUIRED header, base64 JSON).
+    With one: verifies and settles through the facilitator, then returns the
+    engagement receipt (agreement id + settlement transaction).
+    """
     with closing(get_connection()) as conn:
+        row = conn.execute("SELECT * FROM talents WHERE id = ?", (talent_id,)).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Talent not found")
+
+    talent = dict(row)
+    resource = f"/engage/{talent_id}"
+    requirements = build_requirements(talent, resource)
+
+    if not payment_signature:
+        body = {"x402Version": 2, "accepts": [requirements]}
+        return JSONResponse(
+            status_code=402,
+            content=body,
+            headers={"PAYMENT-REQUIRED": base64.b64encode(json.dumps(body).encode()).decode()},
+        )
+
+    payload = decode_payment_signature(payment_signature)
+    settlement = verify_and_settle(payload, requirements)
+
+    return {
+        "status": "engaged",
+        "talent": row_to_profile(row),
+        "settlement": settlement,
+    }
+
+
+@app.put("/talent/{talent_id}", response_model=TalentProfile)
+async def update_talent(talent_id: int, profile: TalentProfileInput, signer: str = Depends(require_wallet_auth)):
+    with closing(get_connection()) as conn:
+        existing = conn.execute("SELECT receive_address FROM talents WHERE id = ?", (talent_id,)).fetchone()
+        if not existing:
+            raise HTTPException(status_code=404, detail="Talent not found")
+        # Only the wallet that controls the registered payout address may edit.
+        if signer != existing["receive_address"].lower():
+            raise HTTPException(status_code=403, detail="Signer does not control this profile")
+        if profile.receive_address.lower() != existing["receive_address"].lower():
+            raise HTTPException(status_code=400, detail="receive_address cannot be changed; register a new profile")
         cursor = conn.execute(
             """
             UPDATE talents
@@ -193,28 +253,6 @@ async def update_talent(talent_id: int, profile: TalentProfileInput):
         row = conn.execute("SELECT * FROM talents WHERE id = ?", (talent_id,)).fetchone()
 
     return row_to_profile(row)
-
-
-class DeltaVReportRequest(BaseModel):
-    message: Optional[str] = Field(default=None, max_length=5000)
-    api_key: Optional[str] = Field(default=None)
-
-
-@app.post("/deltav/weekly-update")
-@app.post("/deltav/report")
-async def send_deltav_report(req: Optional[DeltaVReportRequest] = None):
-    try:
-        from deltav_protocol import DeltaVReportProtocol, generate_full_suite_report
-        custom_notes = req.message if req else None
-        api_key = req.api_key if req else None
-        
-        content = generate_full_suite_report(custom_notes)
-        protocol = DeltaVReportProtocol(api_key=api_key)
-        res = protocol.transport_report(content)
-        return {"status": "ok", "transport_result": res}
-    except Exception as e:
-        logger.error("Failed to transport deltaV report: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/chat")

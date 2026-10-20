@@ -25,9 +25,17 @@ X402_VERSION = 2
 TOKEN_DECIMALS = 6  # bridged USDT / WQI-style settlement tokens
 
 
+def normalize_facilitator_url(raw: str) -> str:
+    """Accept schemeless host:port values (Render's fromService hostport property)."""
+    url = raw.strip().rstrip("/")
+    if url and "://" not in url:
+        url = "http://" + url
+    return url
+
+
 def x402_config() -> dict:
     return {
-        "facilitator_url": os.getenv("FACILITATOR_URL", "http://localhost:3402"),
+        "facilitator_url": normalize_facilitator_url(os.getenv("FACILITATOR_URL", "http://localhost:3402")),
         "network": os.getenv("X402_NETWORK", "eip155:9"),
         "escrow": os.getenv("ESCROW_ADDRESS", ""),
         "settlement_token": os.getenv("SETTLEMENT_TOKEN", ""),

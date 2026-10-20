@@ -222,3 +222,13 @@ def test_engage_propagates_facilitator_rejection(monkeypatch):
     res = client.get(f"/engage/{talent['id']}", headers={"PAYMENT-SIGNATURE": header})
     assert res.status_code == 402
     assert "insufficient_balance" in res.json()["detail"]
+
+
+def test_facilitator_url_normalization():
+    """Render's fromService hostport property yields schemeless host:port values."""
+    from x402_server import normalize_facilitator_url
+
+    assert normalize_facilitator_url("btai-facilitator:3402") == "http://btai-facilitator:3402"
+    assert normalize_facilitator_url("http://facilitator.test") == "http://facilitator.test"
+    assert normalize_facilitator_url("https://fac.example.com/") == "https://fac.example.com"
+    assert normalize_facilitator_url("  host:1234/  ") == "http://host:1234"

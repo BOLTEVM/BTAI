@@ -1,0 +1,68 @@
+# Render Blueprint — one-click deploy of the Dark Star Rail backend stack.
+#
+#   Render Dashboard → New → Blueprint → select BOLTEVM/BTAI
+#
+# Render reads this file, builds both Docker images, and prompts once for the only
+# secret (FACILITATOR_PRIVATE_KEY, sync:false — it never enters the repo). Both
+# services need a paid plan: persistent disks are unavailable on free instances, and
+# the sqlite directory and the nonce registry must survive redeploys (the nonce db is
+# what makes payment replay impossible).
+services:
+  # The settlement hot key lives here — a PRIVATE service, unreachable from the
+  # public internet; only the API reaches it over Render's private network.
+  - type: pserv
+    name: btai-facilitator
+    runtime: docker
+    dockerfilePath: packages/facilitator/Dockerfile
+    dockerContext: .
+    plan: 0.5c-512mb
+    disk:
+      name: btai-facilitator-data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: FACILITATOR_NETWORK
+        value: eip155:9
+      - key: FACILITATOR_CHAIN_ID
+        value: "9"
+      - key: ESCROW_ADDRESS
+        value: 0x00558035cfFAa4766A7f77cA987650711bDaF7a6
+      - key: SETTLEMENT_TOKENS
+        value: 0x0049f7cbca3556c2dfae62aafa7015f99de1b8f5
+      - key: QUAI_RPC_URL
+        value: https://rpc.quai.network
+      # The escrow's on-chain agent key. Fund it with only enough QUAI for gas;
+      # rotate it if it ever leaks. Render prompts for the value at deploy time.
+      - key: FACILITATOR_PRIVATE_KEY
+        sync: false
+
+  - type: web
+    name: btai-api
+    runtime: docker
+    dockerfilePath: apps/backend/Dockerfile
+    dockerContext: apps/backend
+    plan: 0.5c-512mb
+    healthCheckPath: /health
+    disk:
+      name: btai-talent-data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      # the deployed frontend's origin — without it the browser blocks every call
+      - key: BTAI_ALLOWED_ORIGINS
+        value: https://darkcircle.si
+      - key: BTAI_CHAIN
+        value: quai
+      - key: X402_NETWORK
+        value: eip155:9
+      - key: ESCROW_ADDRESS
+        value: 0x00558035cfFAa4766A7f77cA987650711bDaF7a6
+      - key: SETTLEMENT_TOKEN
+        value: 0x0049F7cbCa3556C2DfaE62Aafa7015F99de1b8f5
+      # hostport yields "<internal-host>:3402" on Render's private network;
+      # x402_server.normalize_facilitator_url prepends http:// when the scheme is absent
+      - key: FACILITATOR_URL
+        fromService:
+          type: pserv
+          name: btai-facilitator
+          property: hostport

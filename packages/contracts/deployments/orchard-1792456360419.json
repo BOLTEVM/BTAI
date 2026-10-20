@@ -1,0 +1,9 @@
+{
+  "network": "eip155:15000",
+  "escrow": "0x0042bc0BBbe34FBa82a52Cce6a2792DaA87c484C",
+  "settlementToken": "0x0043a6b95A33A5Ac6ece32A4C172AE83390c2C59",
+  "feeBps": 250,
+  "feeRecipient": "0x003279113881A8a0E3920078D8A1e4776a54db4e",
+  "deployer": "0x003279113881A8a0E3920078D8A1e4776a54db4e",
+  "deployedAt": "2026-10-20T00:32:40.418Z"
+}

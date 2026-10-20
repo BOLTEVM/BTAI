@@ -1,0 +1,22 @@
+[profile.default]
+src = "src"
+test = "test"
+out = "out"
+libs = ["lib"]
+solc = "0.8.24"
+evm_version = "paris"
+via_ir = true
+optimizer = true
+optimizer_runs = 200
+# vm.deployCode reads the synced Hardhat artifacts (Vyper bytecode).
+fs_permissions = [{ access = "read", path = "test-artifacts" }]
+
+# Fuzz/invariant depth — the escrow's invariants are arithmetic, so more runs
+# buy real coverage of the fee-split and timeout boundaries.
+[fuzz]
+runs = 512
+
+[invariant]
+runs = 64
+depth = 32
+fail_on_revert = false

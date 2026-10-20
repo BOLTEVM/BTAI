@@ -48,6 +48,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12" # slither 0.11.6 requires Python >= 3.10
       - name: Slither static analysis (Solidity helper contracts)
         uses: crytic/slither-action@v0.4.1
         with:
@@ -93,6 +96,7 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # No NEXT_PUBLIC_PRIVY_APP_ID here: the Privy SDK validates the ID at
+      # init and a dummy value fails static prerender; Providers.tsx renders a
+      # build-safe fallback when the var is unset.
       - run: pnpm --filter frontend build
-        env:
-          NEXT_PUBLIC_PRIVY_APP_ID: dummy-ci-app-id

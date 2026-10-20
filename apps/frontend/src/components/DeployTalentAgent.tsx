@@ -2,9 +2,15 @@
 
 import { useCallback, useMemo, useState } from "react";
 import { ConnectedWallet, useConnectWallet, useWallets } from "@privy-io/react-auth";
+import { Chain, encodeAbiParameters } from "viem";
 import { BaiPipelineProgress, BaiPipelineStage, BaiWalletPipeline } from "@/lib/WalletPipeline";
 import { TALENT_AGENT_BYTECODE, TALENT_AGENT_COMPILER } from "@/lib/talentAgent.generated";
+import { TALENT_AGENT_QUAI_BYTECODE } from "@/lib/talentAgentQuai.generated";
 import { DEFAULT_USDC_NETWORK, getUsdcDeployment, USDC_REGISTRY, UsdcNetwork } from "@/lib/usdc";
+import { isCyprus1Address, isQuaiNetwork, QUAI_REGISTRY, QuaiNetwork } from "@/lib/quai";
+
+/** Any rail the deploy panel can target. */
+type SettlementNetwork = UsdcNetwork | QuaiNetwork;
 
 /** Ordered stages, so the UI can render a checklist rather than one status line. */
 const STAGE_SEQUENCE: { stage: BaiPipelineStage; label: string }[] = [
@@ -14,6 +20,9 @@ const STAGE_SEQUENCE: { stage: BaiPipelineStage; label: string }[] = [
   { stage: "awaiting-confirmation", label: "Await on-chain confirmation" },
   { stage: "confirmed", label: "Escrow live" },
 ];
+
+/** Protocol fee (bps) baked into a session-deployed QUAI escrow: 2.5%. */
+const QUAI_DEPLOY_FEE_BPS = 250n;
 
 function stageIndex(stage?: BaiPipelineStage) {
   if (!stage) return -1;
@@ -34,7 +43,7 @@ interface DeployTalentAgentProps {
   /** Escrow currently in use, from env or a previous deploy. */
   activeAddress?: string;
   /** Called once a deployment is confirmed, so the escrow rail can adopt it. */
-  onDeployed: (address: string, network: UsdcNetwork) => void;
+  onDeployed: (address: string, network: SettlementNetwork) => void;
   onClose: () => void;
 }
 
@@ -43,7 +52,7 @@ export default function DeployTalentAgent({ activeAddress, onDeployed, onClose }
   const { connectWallet } = useConnectWallet();
 
   const [selectedWalletAddress, setSelectedWalletAddress] = useState<string | null>(null);
-  const [network, setNetwork] = useState<UsdcNetwork>(DEFAULT_USDC_NETWORK);
+  const [network, setNetwork] = useState<SettlementNetwork>(DEFAULT_USDC_NETWORK);
   const [progress, setProgress] = useState<BaiPipelineProgress | null>(null);
   const [isDeploying, setIsDeploying] = useState(false);
   const [deployed, setDeployed] = useState<{ address: string; txHash?: string } | null>(null);
@@ -56,8 +65,18 @@ export default function DeployTalentAgent({ activeAddress, onDeployed, onClose }
     [wallets, selectedWalletAddress]
   );
 
-  const usdc = getUsdcDeployment(network);
-  const explorerBase = usdc.chain.blockExplorers?.default?.url;
+  const quaiTarget = isQuaiNetwork(network) ? QUAI_REGISTRY[network] : null;
+  const targetLabel = quaiTarget ? quaiTarget.label : getUsdcDeployment(network as UsdcNetwork).label;
+  const targetChain: Chain = quaiTarget
+    ? quaiTarget.chain
+    : getUsdcDeployment(network as UsdcNetwork).chain;
+  const targetTestnet = quaiTarget ? quaiTarget.testnet : getUsdcDeployment(network as UsdcNetwork).testnet;
+  const explorerBase = targetChain.blockExplorers?.default?.url;
+
+  // QUAI deploys are Cyprus-1 only: a deployer outside the 0x00 shard produces
+  // an escrow nobody in the active zone can reach.
+  const shardBlocked = Boolean(quaiTarget && selectedWallet && !isCyprus1Address(selectedWallet.address));
+  const quaiTokenMissing = Boolean(quaiTarget && !quaiTarget.tokenAddress);
 
   // Track the furthest stage reached rather than the current one, so a failure
   // (which is outside the sequence) leaves the checklist showing how far it got.
@@ -71,6 +90,14 @@ export default function DeployTalentAgent({ activeAddress, onDeployed, onClose }
   const deploy = useCallback(async () => {
     if (!selectedWallet) {
       setError("Connect a wallet before deploying.");
+      return;
+    }
+    if (shardBlocked) {
+      setError("The selected wallet is not in the Cyprus-1 shard (0x00...). Choose a Cyprus-1 account in Pelagus.");
+      return;
+    }
+    if (quaiTokenMissing) {
+      setError("No settlement token configured for this QUAI network. Set NEXT_PUBLIC_QUAI_SETTLEMENT_TOKEN first.");
       return;
     }
 
@@ -88,21 +115,33 @@ export default function DeployTalentAgent({ activeAddress, onDeployed, onClose }
       // pipeline's ensureChain covers extension wallets and is a no-op when the
       // wallet is already on the target chain.
       try {
-        await selectedWallet.switchChain(usdc.chain.id);
+        await selectedWallet.switchChain(targetChain.id);
       } catch {
         // Handled by the pipeline below.
       }
 
+      // TalentAgentQuai's constructor pins the settlement-token allowlist and
+      // the protocol fee; the legacy TalentAgent takes no arguments.
+      const constructorArgs = quaiTarget
+        ? encodeAbiParameters(
+            [{ type: "address" }, { type: "address" }, { type: "uint256" }],
+            [quaiTarget.tokenAddress!, selectedWallet.address as `0x${string}`, QUAI_DEPLOY_FEE_BPS]
+          )
+        : undefined;
+
       // The pipeline resolves only once the receipt is confirmed, so this await
       // covers the whole lifecycle: chain switch, signature, mining, receipt.
+      // Pelagus encodes QUAI's protobuf transactions internally, so the same
+      // EIP-1193 pipeline works unchanged on the QUAI rail.
       const result = await BaiWalletPipeline.deployAndAwaitContract({
-        bytecode: TALENT_AGENT_BYTECODE,
-        contractName: "TalentAgent",
+        bytecode: quaiTarget ? TALENT_AGENT_QUAI_BYTECODE : TALENT_AGENT_BYTECODE,
+        contractName: quaiTarget ? "TalentAgentQuai" : "TalentAgent",
+        constructorArgs,
         provider,
         from: selectedWallet.address,
-        chainId: usdc.chain.id,
-        rpcUrl: usdc.chain.rpcUrls.default.http[0],
-        confirmations: usdc.testnet ? 1 : 2,
+        chainId: targetChain.id,
+        rpcUrl: targetChain.rpcUrls.default.http[0],
+        confirmations: targetTestnet ? 1 : 2,
         timeoutMs: 300_000,
         agentId: "BTAI_ORCHESTRATOR",
         onProgress: handleProgress,
@@ -120,7 +159,7 @@ export default function DeployTalentAgent({ activeAddress, onDeployed, onClose }
     } finally {
       setIsDeploying(false);
     }
-  }, [selectedWallet, usdc, network, onDeployed, handleProgress]);
+  }, [selectedWallet, quaiTarget, targetChain, targetTestnet, network, onDeployed, handleProgress, shardBlocked, quaiTokenMissing]);
 
   return (
     <div className="fixed inset-0 z-[110] flex items-center justify-center px-6">
@@ -129,8 +168,10 @@ export default function DeployTalentAgent({ activeAddress, onDeployed, onClose }
       <div className="glass relative z-10 max-h-[90vh] w-full max-w-2xl overflow-y-auto border-cyan-500/30 p-10">
         <h2 className="mb-2 text-3xl font-black uppercase tracking-tighter gradient-text">Deploy Escrow Node</h2>
         <p className="mb-8 text-sm font-light leading-relaxed text-white/40">
-          Puts your own <span className="font-mono text-cyan-400">TalentAgent</span> escrow on-chain. You become its
-          orchestrator, and the x402 rail settles into it. Compiled with {TALENT_AGENT_COMPILER}.
+          Puts your own escrow on-chain. You become its orchestrator, and the x402 rail settles into it.
+          USDC rail compiled with {TALENT_AGENT_COMPILER}; the QUAI rail deploys{" "}
+          <span className="font-mono text-cyan-400">TalentAgentQuai</span> (milestones, fee split, dispute window,
+          gasless EIP-712 settlement).
         </p>
 
         {/* Step 1 — signer */}
@@ -190,6 +231,25 @@ export default function DeployTalentAgent({ activeAddress, onDeployed, onClose }
             2 · Settlement Network
           </span>
           <div className="grid grid-cols-2 gap-2 md:grid-cols-3">
+            {(Object.keys(QUAI_REGISTRY) as QuaiNetwork[]).map((key) => {
+              const entry = QUAI_REGISTRY[key];
+              const isSelected = key === network;
+              return (
+                <button
+                  key={key}
+                  disabled={isDeploying}
+                  onClick={() => setNetwork(key)}
+                  className={`rounded-lg border px-3 py-2.5 text-left transition-all disabled:opacity-40 ${
+                    isSelected ? "border-cyan-500/60 bg-cyan-500/10" : "border-white/10 bg-white/5 hover:border-white/30"
+                  }`}
+                >
+                  <span className="block text-[11px] font-bold text-white">{entry.label}</span>
+                  <span className="block text-[9px] uppercase tracking-widest text-cyan-400">
+                    x402 · {entry.testnet ? "Testnet" : "Mainnet"}
+                  </span>
+                </button>
+              );
+            })}
             {(Object.keys(USDC_REGISTRY) as UsdcNetwork[]).map((key) => {
               const entry = getUsdcDeployment(key);
               const isSelected = key === network;
@@ -210,9 +270,27 @@ export default function DeployTalentAgent({ activeAddress, onDeployed, onClose }
               );
             })}
           </div>
-          {!usdc.testnet && (
+          {quaiTarget && (
+            <p className="mt-3 text-[11px] leading-relaxed text-cyan-300/70">
+              QUAI rail: clients settle gaslessly — they sign an EIP-712 authorization and the BTAI facilitator
+              submits it on-chain. The escrow constructor pins the settlement token and a 2.5% protocol fee to you.
+            </p>
+          )}
+          {!quaiTarget && !targetTestnet && (
             <p className="mt-3 text-[11px] leading-relaxed text-amber-300/70">
-              {usdc.label} is a mainnet — deployment spends real gas and the escrow will hold real USDC.
+              {targetLabel} is a mainnet — deployment spends real gas and the escrow will hold real USDC.
+            </p>
+          )}
+          {shardBlocked && (
+            <p className="mt-3 text-[11px] leading-relaxed text-red-300/90">
+              The selected wallet is outside the Cyprus-1 shard (0x00...). Only Cyprus-1 accounts can deploy or
+              receive on QUAI right now — switch accounts in Pelagus.
+            </p>
+          )}
+          {quaiTokenMissing && !shardBlocked && (
+            <p className="mt-3 text-[11px] leading-relaxed text-amber-300/70">
+              No settlement token configured for {targetLabel}. Set NEXT_PUBLIC_QUAI_SETTLEMENT_TOKEN
+              (or _ORCHARD_ for testnet) before deploying.
             </p>
           )}
         </section>
@@ -259,7 +337,7 @@ export default function DeployTalentAgent({ activeAddress, onDeployed, onClose }
         {deployed && (
           <div className="mb-6 rounded-lg border border-cyan-500/30 bg-cyan-500/10 p-4">
             <span className="mb-2 block text-[9px] font-black uppercase tracking-widest text-cyan-400">
-              Escrow live on {usdc.label}
+              Escrow live on {targetLabel}
             </span>
             <span className="block break-all font-mono text-[11px] text-white">{deployed.address}</span>
             <div className="mt-3 flex flex-wrap gap-4">
@@ -282,7 +360,10 @@ export default function DeployTalentAgent({ activeAddress, onDeployed, onClose }
             </div>
             <p className="mt-3 text-[11px] leading-relaxed text-white/40">
               This escrow is now active for the session. To make it permanent, set{" "}
-              <span className="font-mono text-cyan-400">NEXT_PUBLIC_TALENT_AGENT_ADDRESS</span> to it.
+              <span className="font-mono text-cyan-400">
+                {quaiTarget ? "NEXT_PUBLIC_TALENT_AGENT_QUAI_ADDRESS" : "NEXT_PUBLIC_TALENT_AGENT_ADDRESS"}
+              </span>{" "}
+              to it.
             </p>
           </div>
         )}
@@ -304,11 +385,11 @@ export default function DeployTalentAgent({ activeAddress, onDeployed, onClose }
           </button>
           <button
             type="button"
-            disabled={isDeploying || !selectedWallet || Boolean(deployed)}
+            disabled={isDeploying || !selectedWallet || Boolean(deployed) || shardBlocked || quaiTokenMissing}
             onClick={deploy}
             className="flex-grow rounded-xl bg-cyan-500 py-4 text-xs font-black uppercase tracking-widest text-black transition-all hover:bg-white disabled:cursor-not-allowed disabled:bg-white/10 disabled:text-white/30"
           >
-            {isDeploying ? "Deploying..." : deployed ? "Deployed" : `Deploy to ${usdc.label}`}
+            {isDeploying ? "Deploying..." : deployed ? "Deployed" : `Deploy to ${targetLabel}`}
           </button>
         </div>
       </div>

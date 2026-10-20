@@ -14,6 +14,13 @@ import {
   parseUnits,
 } from "viem";
 import { DEFAULT_USDC_NETWORK, getUsdcDeployment, USDC_ABI, UsdcNetwork, USDC_REGISTRY } from "@/lib/usdc";
+import {
+  ESCROW_AUTH_TYPES,
+  isCyprus1Address,
+  isQuaiNetwork,
+  QUAI_REGISTRY,
+  QuaiNetwork,
+} from "@/lib/quai";
 import DeployTalentAgent from "@/components/DeployTalentAgent";
 // Generated from TalentAgent.vy, so the ABI can never drift from the deployed
 // bytecode the Deploy Escrow flow ships.
@@ -21,6 +28,10 @@ import { TALENT_AGENT_ABI } from "@/lib/talentAgent.generated";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
 const CONFIGURED_ESCROW = process.env.NEXT_PUBLIC_TALENT_AGENT_ADDRESS as Hex | undefined;
+const CONFIGURED_QUAI_ESCROW = process.env.NEXT_PUBLIC_TALENT_AGENT_QUAI_ADDRESS as Hex | undefined;
+
+/** Any rail the escrow can settle on: legacy USDC chains or the QUAI x402 rail. */
+type SettlementNetwork = UsdcNetwork | QuaiNetwork;
 
 // A session-deployed escrow overrides the configured one, so a user can put
 // their own TalentAgent on-chain and immediately route payments through it.
@@ -28,7 +39,7 @@ const DEPLOYED_ESCROW_KEY = "btai.deployedEscrow";
 
 interface DeployedEscrow {
   address: Hex;
-  network: UsdcNetwork;
+  network: SettlementNetwork;
 }
 
 interface TalentApiProfile {
@@ -58,8 +69,27 @@ interface ChatMessage {
   content: string;
   payment?: {
     amount: string;
-    network: UsdcNetwork;
+    network: SettlementNetwork;
     recipient: string;
+    /** Backend talent id — the QUAI x402 flow engages `/engage/{id}`. */
+    agentId: number;
+  };
+}
+
+/** x402 v2 payment-requirements body returned by the backend 402 challenge. */
+interface X402Requirements {
+  scheme: string;
+  network: string;
+  maxAmountRequired: string;
+  payTo: string;
+  asset: string;
+  maxTimeoutSeconds: number;
+  extra: {
+    name: string;
+    version: string;
+    talent: string;
+    amounts: string[];
+    disputeWindow: string;
   };
 }
 
@@ -70,6 +100,16 @@ const emptyForm = {
   bio: "",
   receiveAddress: "",
 };
+
+const DEFAULT_SETTLEMENT_NETWORK: SettlementNetwork = (() => {
+  const configured = process.env.NEXT_PUBLIC_X402_NETWORK;
+  if (configured && configured in QUAI_REGISTRY) return configured as QuaiNetwork;
+  return DEFAULT_USDC_NETWORK;
+})();
+
+function settlementLabel(network: SettlementNetwork): string {
+  return isQuaiNetwork(network) ? QUAI_REGISTRY[network].label : getUsdcDeployment(network).label;
+}
 
 function mapTalent(profile: TalentApiProfile): Agent {
   return {
@@ -82,6 +122,13 @@ function mapTalent(profile: TalentApiProfile): Agent {
     receiveAddress: profile.receive_address,
     skills: profile.skills,
   };
+}
+
+/** Random 32-byte x402 authorization nonce. */
+function randomNonce(): Hex {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  return `0x${Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("")}`;
 }
 
 export default function Home() {
@@ -98,6 +145,7 @@ export default function Home() {
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [isDeployOpen, setIsDeployOpen] = useState(false);
   const [deployedEscrow, setDeployedEscrow] = useState<DeployedEscrow | null>(null);
+  const [selectedNetwork, setSelectedNetwork] = useState<SettlementNetwork | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       role: "agent",
@@ -120,7 +168,7 @@ export default function Home() {
     try {
       const parsed = JSON.parse(stored) as DeployedEscrow;
       // Guard against a stale entry naming a network this build no longer ships.
-      if (parsed.address?.startsWith("0x") && parsed.network in USDC_REGISTRY) {
+      if (parsed.address?.startsWith("0x") && (parsed.network in USDC_REGISTRY || parsed.network in QUAI_REGISTRY)) {
         setDeployedEscrow(parsed);
       } else {
         window.localStorage.removeItem(DEPLOYED_ESCROW_KEY);
@@ -130,21 +178,31 @@ export default function Home() {
     }
   }, []);
 
-  const adoptDeployedEscrow = useCallback((address: string, network: UsdcNetwork) => {
+  const adoptDeployedEscrow = useCallback((address: string, network: SettlementNetwork) => {
     const escrow: DeployedEscrow = { address: address as Hex, network };
     setDeployedEscrow(escrow);
+    setSelectedNetwork(null);
     window.localStorage.setItem(DEPLOYED_ESCROW_KEY, JSON.stringify(escrow));
     setMessages((prev) => [
       ...prev,
       {
         role: "agent",
-        content: `Escrow node deployed to ${getUsdcDeployment(network).label} at ${address}. Payments now settle through it.`,
+        content: `Escrow node deployed to ${settlementLabel(network)} at ${address}. Payments now settle through it.`,
       },
     ]);
   }, []);
 
-  const escrowAddress = deployedEscrow?.address ?? CONFIGURED_ESCROW;
-  const settlementNetwork = deployedEscrow?.network ?? DEFAULT_USDC_NETWORK;
+  // A session-deployed escrow pins the rail it lives on; an explicit manual
+  // selection wins next; otherwise the configured default.
+  const settlementNetwork: SettlementNetwork =
+    selectedNetwork ?? deployedEscrow?.network ?? DEFAULT_SETTLEMENT_NETWORK;
+
+  const escrowAddress =
+    deployedEscrow && deployedEscrow.network === settlementNetwork
+      ? deployedEscrow.address
+      : isQuaiNetwork(settlementNetwork)
+        ? CONFIGURED_QUAI_ESCROW
+        : CONFIGURED_ESCROW;
 
   useEffect(() => {
     fetchTalents().catch((error) => {
@@ -201,11 +259,12 @@ export default function Home() {
       ...prev,
       {
         role: "agent",
-        content: `Escrow is ready for ${agent.name}. Review the hourly rate and authorize when you are ready.`,
+        content: `Escrow is ready for ${agent.name} on ${settlementLabel(settlementNetwork)}. Review the hourly rate and authorize when you are ready.`,
         payment: {
           amount: String(agent.rate),
           network: settlementNetwork,
           recipient: agent.receiveAddress,
+          agentId: agent.id,
         },
       },
     ]);
@@ -234,18 +293,183 @@ export default function Home() {
     }
   };
 
-  const fulfillPayment = async (amount: string, network: UsdcNetwork, recipient: string) => {
+  /**
+   * QUAI x402 flow — gasless for the client:
+   *   1. one-time token approval to the escrow (the only client transaction);
+   *   2. GET /engage/{id} → 402 payment requirements;
+   *   3. sign an EIP-712 EscrowAuthorization in Pelagus;
+   *   4. retry with PAYMENT-SIGNATURE — the facilitator settles on-chain.
+   */
+  const fulfillQuaiPayment = async (amount: string, network: QuaiNetwork, recipient: string, agentId: number) => {
+    const quai = QUAI_REGISTRY[network];
+    const say = (content: string) => setMessages((prev) => [...prev, { role: "agent", content }]);
+
+    if (!quai.tokenAddress) {
+      say(`No settlement token configured for ${quai.label}. Set NEXT_PUBLIC_QUAI_SETTLEMENT_TOKEN.`);
+      return;
+    }
+    if (!isCyprus1Address(recipient)) {
+      say("Protocol error: the talent address is not in the active Cyprus-1 shard (0x00...). Payment halted.");
+      return;
+    }
+
+    const wallet = wallets[0]!;
+    try {
+      // Pelagus knows the QUAI chains natively; a failed switch is not fatal —
+      // the signing request will surface the mismatch to the user.
+      await wallet.switchChain(quai.chain.id);
+    } catch {
+      // continue
+    }
+    const provider = await wallet.getEthereumProvider();
+    const transport = custom(provider);
+    const publicClient = createPublicClient({ chain: quai.chain, transport });
+    const walletClient = createWalletClient({ chain: quai.chain, transport });
+    const account = wallet.address as Hex;
+
+    if (!isCyprus1Address(account)) {
+      say("This wallet's address is not in the Cyprus-1 shard (0x00...). Pick a Cyprus-1 account in Pelagus.");
+      return;
+    }
+
+    const parsedAmount = parseUnits(amount, quai.decimals);
+
+    const balance = await publicClient.readContract({
+      address: quai.tokenAddress,
+      abi: USDC_ABI,
+      functionName: "balanceOf",
+      args: [account],
+    });
+    if (balance < parsedAmount) {
+      say(
+        `Insufficient settlement-token balance on ${quai.label}: the escrow needs ${amount} but this wallet holds ` +
+          `${formatUnits(balance, quai.decimals)}.`
+      );
+      return;
+    }
+
+    // The escrow pulls tokens via transferFrom when the facilitator settles.
+    const allowance = await publicClient.readContract({
+      address: quai.tokenAddress,
+      abi: USDC_ABI,
+      functionName: "allowance",
+      args: [account, escrowAddress as Hex],
+    });
+    if (allowance < parsedAmount) {
+      const approvalHash = await walletClient.sendTransaction({
+        account,
+        to: quai.tokenAddress,
+        data: encodeFunctionData({
+          abi: USDC_ABI,
+          functionName: "approve",
+          args: [escrowAddress as Hex, parsedAmount],
+        }),
+      });
+      say(`${quai.label} token allowance approved. TX: ${approvalHash.slice(0, 10)}...`);
+      await publicClient.waitForTransactionReceipt({ hash: approvalHash });
+    }
+
+    // x402 challenge: fetch the payment requirements from the resource server.
+    const challenge = await fetch(`${API_BASE_URL}/engage/${agentId}`);
+    if (challenge.status !== 402) {
+      const body = await challenge.json().catch(() => ({}));
+      throw new Error(body.detail || `Engagement challenge failed with status ${challenge.status}`);
+    }
+    const challengeBody = (await challenge.json()) as { accepts: X402Requirements[] };
+    const reqs = challengeBody.accepts?.[0];
+    if (!reqs || reqs.scheme !== "btai-escrow") {
+      throw new Error("The backend did not offer a btai-escrow payment requirement.");
+    }
+    if ( reqs.payTo.toLowerCase() !== (escrowAddress as string).toLowerCase()) {
+      throw new Error("Backend escrow address does not match the configured escrow. Refusing to sign.");
+    }
+
+    // EIP-712 EscrowAuthorization — the message total must equal the sum of
+    // the milestone amounts the facilitator will pass on-chain.
+    const amounts = reqs.extra.amounts;
+    const total = amounts.reduce((sum, a) => sum + BigInt(a), 0n);
+    const validBefore = Math.floor(Date.now() / 1000) + reqs.maxTimeoutSeconds;
+    const nonce = randomNonce();
+
+    const typedData = {
+      domain: {
+        name: reqs.extra.name,
+        version: reqs.extra.version,
+        chainId: quai.chain.id,
+        verifyingContract: reqs.payTo as Hex,
+      },
+      types: ESCROW_AUTH_TYPES,
+      primaryType: "EscrowAuthorization",
+      message: {
+        client: account,
+        talent: reqs.extra.talent as Hex,
+        token: reqs.asset as Hex,
+        total: total.toString(),
+        disputeWindow: reqs.extra.disputeWindow,
+        validBefore: String(validBefore),
+        nonce,
+      },
+    };
+
+    say("Sign the EscrowAuthorization in your wallet — no gas, no transaction.");
+    const signature = (await provider.request({
+      method: "eth_signTypedData_v4",
+      params: [account, JSON.stringify(typedData)],
+    })) as string;
+
+    const paymentPayload = {
+      x402Version: 2,
+      scheme: reqs.scheme,
+      network: reqs.network,
+      payload: {
+        signature,
+        authorization: {
+          client: account,
+          talent: reqs.extra.talent,
+          token: reqs.asset,
+          amounts,
+          disputeWindow: reqs.extra.disputeWindow,
+          validBefore: String(validBefore),
+          nonce,
+        },
+      },
+    };
+
+    const settleRes = await fetch(`${API_BASE_URL}/engage/${agentId}`, {
+      headers: { "PAYMENT-SIGNATURE": btoa(JSON.stringify(paymentPayload)) },
+    });
+    const settleBody = await settleRes.json().catch(() => ({}));
+    if (!settleRes.ok) {
+      say(`Payment rejected: ${settleBody.detail ?? `status ${settleRes.status}`}`);
+      return;
+    }
+
+    const settlement = settleBody.settlement ?? {};
+    say(
+      settlement.agreementId !== undefined
+        ? `Agreement #${settlement.agreementId} funded with ${amount} on ${quai.label} — settled gaslessly via x402. ` +
+          `TX: ${String(settlement.transaction ?? "").slice(0, 10)}...`
+        : `${amount} settled on ${quai.label} via x402.`
+    );
+  };
+
+  const fulfillPayment = async (amount: string, network: SettlementNetwork, recipient: string, agentId: number) => {
     if (!wallets[0]) return alert("Please connect your wallet first.");
     if (!escrowAddress) {
-      return alert("No escrow contract configured. Deploy one, or set NEXT_PUBLIC_TALENT_AGENT_ADDRESS.");
+      return alert("No escrow contract configured. Deploy one, or set the escrow env var for this network.");
     }
     if (!recipient) return alert("Talent receive address is missing.");
 
-    const usdc = getUsdcDeployment(network);
     const say = (content: string) => setMessages((prev) => [...prev, { role: "agent", content }]);
 
     setIsProcessingPayment(true);
     try {
+      if (isQuaiNetwork(network)) {
+        await fulfillQuaiPayment(amount, network, recipient, agentId);
+        return;
+      }
+
+      const usdc = getUsdcDeployment(network);
       const wallet = wallets[0];
       // Real USDC only exists on its own chain, so the wallet has to be there
       // before anything is signed.
@@ -377,16 +601,42 @@ export default function Home() {
         <p className="max-w-2xl text-xl font-light leading-relaxed text-white/50">
           BTAI mediates high-end collaboration with registered talent profiles, wallet authentication, and smart contract escrow.
         </p>
+
+        <div className="mt-8 flex items-center gap-3">
+          <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/30">Settlement Rail</span>
+          <select
+            value={settlementNetwork}
+            disabled={Boolean(deployedEscrow)}
+            onChange={(e) => setSelectedNetwork(e.target.value as SettlementNetwork)}
+            className="rounded-lg border border-white/10 bg-black/60 px-3 py-2 font-mono text-xs text-cyan-300 disabled:opacity-50"
+          >
+            <optgroup label="QUAI x402 rail (gasless)">
+              {(Object.keys(QUAI_REGISTRY) as QuaiNetwork[]).map((key) => (
+                <option key={key} value={key}>
+                  {QUAI_REGISTRY[key].label}
+                </option>
+              ))}
+            </optgroup>
+            <optgroup label="USDC rail">
+              {(Object.keys(USDC_REGISTRY) as UsdcNetwork[]).map((key) => (
+                <option key={key} value={key}>
+                  {USDC_REGISTRY[key].label}
+                </option>
+              ))}
+            </optgroup>
+          </select>
+        </div>
+
         {statusMessage && <p className="mt-6 text-sm text-red-300">{statusMessage}</p>}
         {escrowAddress ? (
           <p className="mt-6 font-mono text-[11px] text-white/30">
-            Escrow {deployedEscrow ? "deployed this session" : "from configuration"} on{" "}
-            <span className="text-cyan-400">{getUsdcDeployment(settlementNetwork).label}</span> ·{" "}
+            Escrow {deployedEscrow && deployedEscrow.network === settlementNetwork ? "deployed this session" : "from configuration"} on{" "}
+            <span className="text-cyan-400">{settlementLabel(settlementNetwork)}</span> ·{" "}
             <span className="text-white/50">{escrowAddress}</span>
           </p>
         ) : (
           <p className="mt-6 text-sm text-amber-300/70">
-            No escrow contract yet. Deploy one to start settling in USDC.
+            No escrow contract on {settlementLabel(settlementNetwork)} yet. Deploy one to start settling.
           </p>
         )}
       </header>
@@ -491,10 +741,10 @@ export default function Home() {
                   {msg.payment && (
                     <div className="mt-4 flex flex-col gap-3 border-t border-white/10 pt-4">
                       <div className="flex items-center justify-between font-mono text-[10px] text-white/40">
-                        <span>{getUsdcDeployment(msg.payment.network).label} USDC</span>
+                        <span>{settlementLabel(msg.payment.network)}{isQuaiNetwork(msg.payment.network) ? "" : " USDC"}</span>
                         <span className="text-cyan-400">{msg.payment.amount}</span>
                       </div>
-                      <button disabled={isProcessingPayment} onClick={() => fulfillPayment(msg.payment!.amount, msg.payment!.network, msg.payment!.recipient)} className="w-full rounded-lg bg-white py-2.5 text-[10px] font-black uppercase tracking-widest text-black transition-all hover:bg-cyan-400 disabled:cursor-wait disabled:bg-white/10 disabled:text-white/30">
+                      <button disabled={isProcessingPayment} onClick={() => fulfillPayment(msg.payment!.amount, msg.payment!.network, msg.payment!.recipient, msg.payment!.agentId)} className="w-full rounded-lg bg-white py-2.5 text-[10px] font-black uppercase tracking-widest text-black transition-all hover:bg-cyan-400 disabled:cursor-wait disabled:bg-white/10 disabled:text-white/30">
                         {isProcessingPayment ? "Settling on Chain..." : "Authorize Escrow"}
                       </button>
                     </div>

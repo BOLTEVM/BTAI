@@ -7,17 +7,16 @@
 #
 FROM node:22-slim
 
-ENV PNPM_HOME=/pnpm
-RUN corepack enable
+# Pin the same pnpm the repo CI uses; a global npm install keeps the binary
+# executable for the non-root runtime user (a corepack cache is per-user).
+RUN npm install -g pnpm@10.29.3
 
 WORKDIR /repo
 
-# lockfile-first so dependency layers cache independently of source
-COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
-COPY packages/facilitator/package.json packages/facilitator/package.json
-RUN pnpm install --frozen-lockfile --filter facilitator
-
-COPY packages/facilitator packages/facilitator
+# Whole workspace: --frozen-lockfile verifies every importer in pnpm-lock.yaml,
+# so a partial copy would fail the install. .dockerignore keeps the context slim.
+COPY . .
+RUN pnpm install --frozen-lockfile --filter facilitator...
 
 RUN useradd --uid 10001 --create-home btai \
     && mkdir -p /data \

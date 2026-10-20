@@ -1,0 +1,10 @@
+# dependencies and build output never belong in the Docker build context
+node_modules
+**/node_modules
+**/dist
+**/.next
+**/out
+**/__pycache__
+**/*.db
+.git
+.github
